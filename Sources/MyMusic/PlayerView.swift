@@ -238,7 +238,8 @@ struct QueueView: View {
   @Environment(\.locale) private var locale
   @EnvironmentObject var model: AppModel
   @State private var showHistory = false
-  private var player: Bool { model.showNowPlaying }
+  var inPlayer: Bool? = nil
+  private var player: Bool { inPlayer ?? model.showNowPlaying }
   private var upcoming: [QueueEntry] { model.state.queue.upcoming }
   var body: some View {
     VStack(spacing: 0) {
@@ -254,7 +255,8 @@ struct QueueView: View {
             let entry = model.state.queue.entries.first(where: { $0.id == id })
           {
             Section(L10n.text("正在播放")) {
-              QueueTrackRow(entry: entry, current: true).id(id).listRowBackground(Color.clear)
+              QueueTrackRow(entry: entry, current: true, player: player).id(id).listRowBackground(
+                Color.clear)
             }
           }
           if !player {
@@ -266,7 +268,7 @@ struct QueueView: View {
             .listRowBackground(Color.clear)
           }
           ForEach(upcoming) { entry in
-            QueueTrackRow(entry: entry).id(entry.id)
+            QueueTrackRow(entry: entry, player: player).id(entry.id)
               .listRowBackground(Color.clear)
               .listRowInsets(EdgeInsets(top: 0, leading: player ? -8 : 8, bottom: 0, trailing: 8))
               .listRowSeparatorTint(player ? .white.opacity(0.10) : .primary.opacity(0.08))
@@ -348,8 +350,8 @@ private struct QueueTrackRow: View {
   @Environment(\.locale) private var locale
   @EnvironmentObject var model: AppModel
   let entry: QueueEntry
-  private var player: Bool { model.showNowPlaying }
   var current = false
+  var player = false
   @State private var hovered = false
   var body: some View {
     HStack(spacing: player ? 12 : 8) {

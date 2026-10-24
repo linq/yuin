@@ -239,7 +239,10 @@ struct ContentView: View {
       isPresented: Binding(
         get: { model.queueInspectorIsPresented }, set: { model.queueInspectorIsPresented = $0 })
     ) {
-      QueueView().inspectorColumnWidth(min: 260, ideal: 270, max: 280)
+      QueueView(inPlayer: false)
+        .allowsHitTesting(!model.showNowPlaying)
+        .accessibilityHidden(model.showNowPlaying)
+        .inspectorColumnWidth(min: 260, ideal: 270, max: 280)
     }
 
     .alert(

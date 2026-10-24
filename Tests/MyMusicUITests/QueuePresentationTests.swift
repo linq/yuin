@@ -6,7 +6,73 @@ import XCTest
 @testable import MyMusic
 
 @MainActor final class QueuePresentationTests: XCTestCase {
-  func testInspectorAndExpandedQueueNeverPresentTogether() throws {
+  private final class LayoutProbe {
+    weak var view: NSView?
+  }
+  private struct Probe: NSViewRepresentable {
+    let probe: LayoutProbe
+    func makeNSView(context: Context) -> NSView {
+      let view = NSView()
+      probe.view = view
+      return view
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+  }
+  private struct InspectorFixture: View {
+    @ObservedObject var model: AppModel
+    let probe: LayoutProbe
+    var body: some View {
+      NavigationSplitView {
+        Color.gray.navigationSplitViewColumnWidth(200)
+      } detail: {
+        Color.red.background(Probe(probe: probe))
+      }
+      .inspector(
+        isPresented: Binding(
+          get: { model.queueInspectorIsPresented },
+          set: { model.queueInspectorIsPresented = $0 })
+      ) {
+        Color.blue.inspectorColumnWidth(270)
+      }
+      .overlay(Color.black.opacity(model.showNowPlaying ? 0.5 : 0))
+    }
+  }
+
+  func testOpeningPlayerWithQueueDoesNotReflowTheUnderlyingCatalog() async throws {
+    _ = NSApplication.shared
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = AppModel(
+      store: LibraryStore(url: directory.appendingPathComponent("library.json")),
+      startServices: false)
+    model.showQueue = true
+    let probe = LayoutProbe()
+    let root = NSHostingView(rootView: InspectorFixture(model: model, probe: probe))
+    let window = NSWindow(
+      contentRect: NSRect(x: -5000, y: -5000, width: 1239, height: 600),
+      styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = root
+    defer { window.close() }
+    func settle() async throws {
+      for _ in 0..<15 {
+        root.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(20))
+      }
+    }
+    try await settle()
+    let width = try XCTUnwrap(probe.view).bounds.width
+    XCTAssertLessThan(width, 900, "The fixture must have a real, open native queue inspector")
+    for expanded in [true, false, true, false] {
+      model.showNowPlaying = expanded
+      try await settle()
+      XCTAssertEqual(
+        try XCTUnwrap(probe.view).bounds.width, width, accuracy: 1,
+        "The catalog behind a fading player must not jump when the queue inspector changes")
+    }
+  }
+
+  func testInspectorStaysMountedUnderTheExpandedPlayer() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let model = AppModel(
@@ -15,7 +81,7 @@ import XCTest
     model.showQueue = true
     XCTAssertTrue(model.queueInspectorIsPresented)
     model.showNowPlaying = true
-    XCTAssertFalse(model.queueInspectorIsPresented)
+    XCTAssertTrue(model.queueInspectorIsPresented)
     model.queueInspectorIsPresented = false
     XCTAssertTrue(
       model.showQueue, "A late inspector dismissal must not close the expanded player queue")

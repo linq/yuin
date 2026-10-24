@@ -34,7 +34,9 @@ import UniformTypeIdentifiers
   @Published var showNowPlaying = false
   @Published var showLyrics = true
   var queueInspectorIsPresented: Bool {
-    get { showQueue && !showNowPlaying }
+    // Keep the native split mounted under the full-window player. Collapsing it
+    // during the fade reflows every catalog cover and moves the artwork anchor.
+    get { showQueue }
     set {
       // Dismissing the native inspector on expansion must not close the player queue.
       if !showNowPlaying { showQueue = newValue }
