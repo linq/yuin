@@ -11,6 +11,13 @@
 - 本地列表增删、命名、收藏和整单副本；手动备份和恢复。
 - 单曲/批量下载、音质和目录选择、最多两首并发、取消、失败重试、Finder 定位、离线播放。
 
+## 默认英文 README 与提交身份（2026-10-24）
+
+- `README.md` 改为默认英文说明，中文说明保存为 `README.zh-CN.md`，两份文件顶部均提供语言切换入口。
+- 英文覆盖下载、构建、自动发布、使用、数据、测试与兼容范围；同时修正中文说明中歌词尚不支持的过时内容。
+- 当前仓库的 Git 提交身份设置为 `linq <fancylinq@gmail.com>`，后续提交使用该身份。
+- 已检查 Markdown 本地链接与差异格式；本次只修改说明文档和仓库本地配置。
+
 ## GitHub Actions 与 Universal 发布（2026-10-24）
 
 - 仓库 `linq/yuin`，工作流 `.github/workflows/build-release.yml`：main/PR 运行离线测试并打包，推送 `vX.Y.Z` 标签后自动发布 GitHub Release，带版本后缀的标签标记为预发布。
