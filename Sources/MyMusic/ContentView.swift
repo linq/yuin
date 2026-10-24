@@ -16,6 +16,9 @@ struct ContentView: View {
   @State private var backdrop = SidebarBackdropState()
   var body: some View {
     browser
+      .background(
+        PlaybackKeyboardShortcuts(expanded: model.showNowPlaying, toggle: model.togglePlayback)
+      )
       .allowsHitTesting(!model.showNowPlaying)
       .accessibilityHidden(model.showNowPlaying)
       .overlay {

@@ -9,7 +9,7 @@ struct ArtworkTone: Equatable, Sendable {
   func distance(to other: Self) -> Double {
     abs(red - other.red) + abs(green - other.green) + abs(blue - other.blue)
   }
-  func playerColor(dark: Bool, depth: Double = 0) -> Color {
+  func playerColor(dark _: Bool, depth: Double = 0) -> Color {
     let color = NSColor(srgbRed: red, green: green, blue: blue, alpha: 1)
     var hue: CGFloat = 0
     var saturation: CGFloat = 0
@@ -17,9 +17,11 @@ struct ArtworkTone: Equatable, Sendable {
     color.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: nil)
     // Preserve the artwork's hue. Neutral covers stay neutral, rather than gaining
     // an unrelated fallback tint. Bound brightness so white text stays readable.
-    let adjustedSaturation = min(0.72, saturation * 1.12)
+    // The immersive player keeps the same album lighting in both system modes.
+    // Avoid boosting saturation: it made blue/green sleeves look uniformly cyan.
+    let adjustedSaturation = min(0.80, saturation * 0.96)
     var adjustedBrightness = min(
-      dark ? 0.44 : 0.57, max(dark ? 0.20 : 0.30, brightness * (dark ? 0.55 : 0.72) + depth))
+      0.56, max(0.20, 0.14 + brightness * 0.55 + depth))
     var result = NSColor(
       hue: hue, saturation: adjustedSaturation, brightness: adjustedBrightness, alpha: 1)
     func linear(_ value: CGFloat) -> CGFloat {
@@ -43,6 +45,20 @@ struct ArtworkPalette: Equatable, Sendable {
   let primary: ArtworkTone
   let secondary: ArtworkTone
   let accent: ArtworkTone
+  let upper: ArtworkTone
+  let lowerLeft: ArtworkTone
+  let lowerRight: ArtworkTone
+  init(
+    primary: ArtworkTone, secondary: ArtworkTone, accent: ArtworkTone,
+    upper: ArtworkTone? = nil, lowerLeft: ArtworkTone? = nil, lowerRight: ArtworkTone? = nil
+  ) {
+    self.primary = primary
+    self.secondary = secondary
+    self.accent = accent
+    self.upper = upper ?? accent
+    self.lowerLeft = lowerLeft ?? primary
+    self.lowerRight = lowerRight ?? secondary
+  }
   static let neutral = Self(
     primary: .init(red: 0.36, green: 0.36, blue: 0.36),
     secondary: .init(red: 0.22, green: 0.22, blue: 0.22),
@@ -54,7 +70,7 @@ struct ArtworkPalette: Equatable, Sendable {
     guard
       let context = CGContext(
         data: &pixels, width: size, height: size, bitsPerComponent: 8,
-        bytesPerRow: size * 4, space: CGColorSpaceCreateDeviceRGB(),
+        bytesPerRow: size * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
     else { return .neutral }
     context.interpolationQuality = .low
@@ -96,7 +112,45 @@ struct ArtworkPalette: Equatable, Sendable {
     let accent =
       ranked.first { $0.distance(to: primary) > 0.48 && $0.distance(to: secondary) > 0.25 }
       ?? secondary
-    return Self(primary: primary, secondary: secondary, accent: accent)
+    // Preserve the sleeve's spatial colors instead of placing the three most
+    // frequent RGB bins at fixed, unrelated corners. In the lower regions, give
+    // colorful subjects more weight than dark shadows. Exclude the title strip.
+    func regional(_ xRange: Range<Int>, _ yRange: Range<Int>, colorful: Bool) -> ArtworkTone {
+      var chosen = Cluster()
+      for y in yRange {
+        for x in xRange {
+          let index = (y * size + x) * 4
+          let alpha = Double(pixels[index + 3]) / 255
+          guard alpha > 0.5 else { continue }
+          let r = min(1, Double(pixels[index]) / 255 / alpha)
+          let g = min(1, Double(pixels[index + 1]) / 255 / alpha)
+          let b = min(1, Double(pixels[index + 2]) / 255 / alpha)
+          let high = max(r, g, b)
+          let low = min(r, g, b)
+          guard high > 0.10, low < 0.92 else { continue }
+          let saturation = (high - low) / high
+          let weight =
+            colorful
+            ? 0.003 + pow(saturation, 4) * pow(high, 1.3)
+            : (0.35 + saturation * 0.65) * max(0.15, high)
+          chosen.count += weight
+          chosen.red += r * weight
+          chosen.green += g * weight
+          chosen.blue += b * weight
+        }
+      }
+      guard chosen.count > 0 else {
+        return primary
+      }
+      return ArtworkTone(
+        red: chosen.red / chosen.count, green: chosen.green / chosen.count,
+        blue: chosen.blue / chosen.count)
+    }
+    return Self(
+      primary: primary, secondary: secondary, accent: accent,
+      upper: regional(0..<size, 0..<20, colorful: false),
+      lowerLeft: regional(0..<27, 20..<42, colorful: true),
+      lowerRight: regional(21..<size, 28..<44, colorful: true))
   }
 }
 
@@ -146,15 +200,15 @@ struct PlayerBackdrop: View {
       ZStack {
         LinearGradient(
           colors: [
-            palette.primary.playerColor(dark: dark),
-            palette.secondary.playerColor(dark: dark, depth: -0.04),
-          ], startPoint: .topLeading, endPoint: .bottomTrailing)
+            palette.upper.playerColor(dark: dark, depth: 0.02),
+            palette.lowerRight.playerColor(dark: dark, depth: -0.04),
+          ], startPoint: .top, endPoint: .bottom)
         RadialGradient(
-          colors: [palette.accent.playerColor(dark: dark, depth: 0.06).opacity(0.8), .clear],
-          center: .topTrailing, startRadius: 0, endRadius: geometry.size.width * 0.85)
+          colors: [palette.lowerLeft.playerColor(dark: dark, depth: 0.01).opacity(0.85), .clear],
+          center: UnitPoint(x: 0, y: 0.65), startRadius: 0, endRadius: geometry.size.width * 0.65)
         RadialGradient(
-          colors: [palette.primary.playerColor(dark: dark, depth: 0.05).opacity(0.65), .clear],
-          center: .bottomLeading, startRadius: 0, endRadius: geometry.size.width * 0.7)
+          colors: [palette.lowerRight.playerColor(dark: dark, depth: -0.02).opacity(0.8), .clear],
+          center: UnitPoint(x: 1, y: 0.85), startRadius: 0, endRadius: geometry.size.width * 0.65)
       }
       .animation(reduceMotion ? nil : .easeInOut(duration: 1.0), value: palette)
       .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: dark)

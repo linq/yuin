@@ -34,6 +34,26 @@ import XCTest
     XCTAssertEqual(palette.primary.red, palette.primary.blue, accuracy: 0.001)
     XCTAssertEqual(palette.primary.red, palette.primary.green, accuracy: 0.001)
   }
+  func testSpatialPaletteKeepsSkyAboveSeparateTerrainColors() {
+    let palette = ArtworkPalette.extract(
+      from: image { context in
+        context.setFillColor(CGColor(red: 0.35, green: 0.5, blue: 0.65, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 100, height: 100))
+        context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.12, alpha: 1))
+      context.fill(CGRect(x: 0, y: 0, width: 50, height: 58))
+        context.setFillColor(CGColor(red: 0.12, green: 0.35, blue: 0.22, alpha: 1))
+      context.fill(CGRect(x: 50, y: 0, width: 50, height: 58))
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+      context.fill(CGRect(x: 0, y: 0, width: 100, height: 8))
+      })
+    XCTAssertGreaterThan(palette.upper.blue, palette.upper.green)
+    XCTAssertGreaterThan(palette.lowerLeft.green, palette.lowerLeft.blue * 2)
+    XCTAssertGreaterThan(palette.lowerRight.green, palette.lowerRight.red * 2)
+    XCTAssertGreaterThan(palette.lowerRight.blue, palette.lowerLeft.blue)
+    let light = NSColor(palette.lowerLeft.playerColor(dark: false)).usingColorSpace(.sRGB)!
+    let dark = NSColor(palette.lowerLeft.playerColor(dark: true)).usingColorSpace(.sRGB)!
+    XCTAssertEqual(light.greenComponent, dark.greenComponent, accuracy: 0.001)
+  }
   func testBrightArtworkTonesRemainReadableBehindLightText() {
     for tone in [
       ArtworkTone(red: 1, green: 1, blue: 0), .init(red: 0, green: 1, blue: 1),
