@@ -52,7 +52,7 @@ See the [release guide](docs/RELEASING.md) for details. Supporting project docum
 
 The floating player provides playback controls, shuffle and repeat-one modes, seeking, song actions, queue access, and volume. Click its artwork or song title to expand Now Playing. Narrow windows hide some controls, while playback modes remain available in the song menu.
 
-Track changes use short audio fades and preload the next track during sequential playback. Artwork and song information transition smoothly, keeping the previous artwork visible until its replacement has loaded.
+Track changes support crossfade: two songs overlap while the outgoing volume fades down and the incoming volume fades up. In Settings → Playback & Downloads, choose 0–12 seconds (5 seconds by default; 0 turns crossfade off). Sequential playback prepares the next track and starts the transition before the current song ends. Network buffering may shorten the overlap. Artwork and song information transition smoothly, keeping the previous artwork visible until its replacement has loaded.
 
 Switching away from Search and back within the same window preserves draft keywords, submitted results, loaded pages, selection, and scroll position. Changing platforms elsewhere causes Search to refresh for the new platform when you return. Search sessions are not restored across app restarts.
 

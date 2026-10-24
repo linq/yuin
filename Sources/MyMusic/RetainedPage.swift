@@ -14,12 +14,16 @@ extension EnvironmentValues {
 /// Keep view identity and local state while making only the visible page interactive.
 struct RetainedPage: ViewModifier {
   let active: Bool
+  var covered = false
   func body(content: Content) -> some View {
+    let interactive = active && !covered
     content
-      .environment(\.musicPageIsActive, active)
+      .environment(\.musicPageIsActive, interactive)
+      // A fading player reveals the selected page underneath. Coverage changes
+      // interaction, never the page's pixels or identity.
       .opacity(active ? 1 : 0)
-      .allowsHitTesting(active)
-      .accessibilityHidden(!active)
+      .allowsHitTesting(interactive)
+      .accessibilityHidden(!interactive)
       .disabled(!active)
   }
 }

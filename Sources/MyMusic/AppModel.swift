@@ -44,7 +44,12 @@ import UniformTypeIdentifiers
   let catalog = MusicCatalog()
   private let store: LibraryStore
   private var runtime: SourceRuntime?
-  private let player: AVPlayer
+  private var player: AVPlayer
+  private let makePlayer: @MainActor () -> AVPlayer
+  private var tailPlayer: AVPlayer?
+  private var tailGain: Float = 0
+  private var overlapDuration: Double = 0
+  private var overlapStarted = false
   private let audioURLResolver: (@MainActor (Track, String) async throws -> URL)?
   private var playTask: Task<Void, Never>?
   private var fadeTask: Task<Void, Never>?
@@ -67,10 +72,12 @@ import UniformTypeIdentifiers
   init(
     store: LibraryStore = LibraryStore(), startServices: Bool = true,
     player: AVPlayer = AVPlayer(),
+    makePlayer: @escaping @MainActor () -> AVPlayer = { AVPlayer() },
     audioURLResolver: (@MainActor (Track, String) async throws -> URL)? = nil
   ) {
     self.store = store
     self.player = player
+    self.makePlayer = makePlayer
     self.audioURLResolver = audioURLResolver
     do { state = try store.load() } catch {
       state = LibraryState()
@@ -88,20 +95,30 @@ import UniformTypeIdentifiers
   }
   private func installPlaybackObservers() {
     guard playerObservation == nil else { return }
+    let observedPlayer = player
     playerObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
       Task { @MainActor [weak self] in
-        guard let self else { return }
+        guard let self, p === self.player else { return }
         self.isPlaying = p.timeControlStatus == .playing
         if self.isPlaying, self.loadedEntryID == self.state.queue.currentID {
           self.isLoadingAudio = false
-          if self.audioGain < 1 {
+          if self.audioGain < 1 && !self.overlapStarted {
             let token = self.playGeneration
             self.fadeTask?.cancel()
             self.fadeTask = Task { [weak self] in
-              try? await self?.fade(to: 1, steps: 12, token: token)
+              guard let self else { return }
+              if self.tailPlayer != nil {
+                self.overlapStarted = true
+                try? await self.crossfade(token: token)
+              } else {
+                try? await self.fade(to: 1, steps: 12, token: token)
+              }
             }
           }
           self.prepareUpcomingPlayback()
+        } else if self.tailPlayer != nil && self.overlapStarted {
+          self.fadeTask?.cancel()
+          self.overlapStarted = false
         }
         self.updateNowPlaying()
       }
@@ -112,7 +129,8 @@ import UniformTypeIdentifiers
       // This callback is explicitly delivered on the main queue. Handle it in
       // place so an outgoing item's queued tick cannot land on its replacement.
       MainActor.assumeIsolated {
-        guard let self, self.player.currentItem != nil, !self.isLoadingAudio,
+        guard let self, self.player === observedPlayer,
+          self.player.currentItem != nil, !self.isLoadingAudio,
           self.loadedEntryID == self.state.queue.currentID
         else { return }
         self.updatePlaybackTime(
@@ -123,6 +141,16 @@ import UniformTypeIdentifiers
         {
           self.refreshedEntryID = self.loadedEntryID
           self.prepareUpcomingPlayback()
+        }
+        let remaining = self.duration - self.position
+        if self.isPlaying, !self.overlapStarted, self.tailPlayer == nil,
+          self.state.crossfadeSeconds > 0, remaining > 0,
+          remaining <= min(self.state.crossfadeSeconds, self.duration / 2),
+          self.state.queue.mode != .repeatOne,
+          !self.state.queue.upcoming.isEmpty
+        {
+          self.next(automatic: true)
+          return
         }
         if Date().timeIntervalSince(self.lastPersist) > 5 {
           self.persist()
@@ -157,6 +185,12 @@ import UniformTypeIdentifiers
   }
   func shutdown() {
     stopAudio()
+    removePlaybackObservers()
+    downloadTasks.values.forEach { $0.cancel() }
+    runtime?.stop()
+    persist()
+  }
+  private func removePlaybackObservers() {
     if let timeToken {
       player.removeTimeObserver(timeToken)
       self.timeToken = nil
@@ -166,9 +200,6 @@ import UniformTypeIdentifiers
       self.endToken = nil
     }
     playerObservation = nil
-    downloadTasks.values.forEach { $0.cancel() }
-    runtime?.stop()
-    persist()
   }
   func notify(_ error: Error) {
     if !(error is CancellationError) { message = error.localizedDescription }
@@ -288,6 +319,23 @@ import UniformTypeIdentifiers
     installPlaybackObservers()
     playTask?.cancel()
     fadeTask?.cancel()
+    // Rapid skips while the incoming player is still buffering keep the audible
+    // tail; once the incoming track is audible it becomes the next outgoing one.
+    if let tailPlayer, player.timeControlStatus != .playing,
+      tailPlayer.timeControlStatus == .playing
+    {
+      removePlaybackObservers()
+      player.pause()
+      player.replaceCurrentItem(with: nil)
+      player = tailPlayer
+      audioGain = tailGain
+      self.tailPlayer = nil
+      installPlaybackObservers()
+    } else {
+      stopTail()
+    }
+    overlapStarted = false
+    let wantsOverlap = state.crossfadeSeconds > 0 && player.timeControlStatus == .playing
     let token = UUID()
     playGeneration = token
     isLoadingAudio = true
@@ -295,10 +343,11 @@ import UniformTypeIdentifiers
     position = resume
     duration = track.duration
     persist()
-    // Fade the audible tail while URL/asset preparation runs concurrently. Keep
-    // the old item attached until the new one is ready to avoid a hard teardown.
+    // With crossfade enabled the outgoing audio keeps playing through preparation.
+    // The disabled path retains the short, non-overlapping transition.
     let outgoing = Task { [weak self] in
       guard let self else { return }
+      if wantsOverlap { return }
       do {
         if self.player.rate > 0 {
           try await self.fade(to: 0, steps: 8, token: token)
@@ -320,6 +369,26 @@ import UniformTypeIdentifiers
         guard token == playGeneration else { return }
         let item = AVPlayerItem(asset: audio.asset)
         item.preferredForwardBufferDuration = 3
+        if wantsOverlap, player.timeControlStatus == .playing {
+          tailPlayer = player
+          tailGain = audioGain
+          let remaining = player.currentItem.map {
+            $0.duration.seconds - player.currentTime().seconds
+          }
+          overlapDuration = min(
+            state.crossfadeSeconds,
+            remaining.map { $0.isFinite && $0 > 0 ? $0 : state.crossfadeSeconds }
+              ?? state.crossfadeSeconds)
+          removePlaybackObservers()
+          player = makePlayer()
+          audioGain = 0
+          player.volume = 0
+          installPlaybackObservers()
+        } else {
+          player.pause()
+          audioGain = 0
+          player.volume = 0
+        }
         loadedEntryID = entryID
         refreshedEntryID = nil
         nowQuality = audio.quality
@@ -414,9 +483,48 @@ import UniformTypeIdentifiers
     }
   }
 
+  private func crossfade(token: UUID) async throws {
+    let initialIncoming = audioGain
+    let initialTail = tailGain
+    let start = ContinuousClock.now
+    // Buffering can consume part of the tail after the new item was attached.
+    // Measure again when it actually becomes audible, not when play() was called.
+    let remaining = tailPlayer.flatMap { tail in
+      tail.currentItem.map { $0.duration.seconds - tail.currentTime().seconds }
+    }
+    let available =
+      remaining.map { $0.isFinite ? max(0, $0) : overlapDuration }
+      ?? overlapDuration
+    let seconds = max(0.016, min(overlapDuration, available))
+    while true {
+      try Task.checkCancellation()
+      guard token == playGeneration else { throw CancellationError() }
+      let elapsed = start.duration(to: .now).components
+      let progress = min(
+        1, (Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18) / seconds)
+      // Equal-power curves avoid a volume dip at the middle of the overlap.
+      audioGain = initialIncoming + (1 - initialIncoming) * Float(sin(progress * .pi / 2))
+      tailGain = initialTail * Float(cos(progress * .pi / 2))
+      player.volume = state.volume * audioGain
+      tailPlayer?.volume = state.volume * tailGain
+      if progress >= 1 { break }
+      try await Task.sleep(for: .milliseconds(16))
+    }
+    stopTail()
+  }
+
+  private func stopTail() {
+    tailPlayer?.pause()
+    tailPlayer?.replaceCurrentItem(with: nil)
+    tailPlayer = nil
+    tailGain = 0
+    overlapStarted = false
+  }
+
   private func stopAudio() {
     playTask?.cancel()
     fadeTask?.cancel()
+    stopTail()
     preparation.cancel()
     playGeneration = UUID()
     isLoadingAudio = false
@@ -434,6 +542,7 @@ import UniformTypeIdentifiers
       stopAudio()
     } else {
       fadeTask?.cancel()
+      stopTail()
       player.pause()
       isPlaying = false
       audioGain = 1
@@ -485,6 +594,12 @@ import UniformTypeIdentifiers
     startCurrent()
   }
   func seek(_ seconds: Double) {
+    if tailPlayer != nil {
+      fadeTask?.cancel()
+      stopTail()
+      audioGain = 1
+      player.volume = state.volume
+    }
     let value = min(max(0, seconds), max(duration, 0))
     position = value
     state.queue.position = value
@@ -497,6 +612,7 @@ import UniformTypeIdentifiers
   func setVolume(_ value: Float) {
     state.volume = value
     player.volume = value * audioGain
+    tailPlayer?.volume = value * tailGain
     persist()
   }
   func enqueue(_ track: Track, next: Bool) {

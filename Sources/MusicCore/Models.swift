@@ -339,6 +339,15 @@ public struct LibraryState: Codable {
   public var downloadDirectory = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Music/MyMusic").path
   public var playbackQuality = "320k"
+  /// Optional on disk so libraries created before crossfade remain readable.
+  public var crossfadeDuration: Double?
+  public var crossfadeSeconds: Double {
+    get {
+      let value = crossfadeDuration ?? 5
+      return value.isFinite ? min(12, max(0, value)) : 5
+    }
+    set { crossfadeDuration = newValue.isFinite ? min(12, max(0, newValue)) : 5 }
+  }
   public var downloadQuality = "320k"
   public var volume: Float = 0.7
   public init() {}

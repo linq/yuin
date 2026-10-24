@@ -150,13 +150,13 @@ struct ContentView: View {
                 kind: kind, isActive: activeCatalog == kind && !model.showNowPlaying,
                 searchFocusRequest: searchFocusRequest
               )
-              .modifier(RetainedPage(active: activeCatalog == kind && !model.showNowPlaying))
+              .modifier(RetainedPage(active: activeCatalog == kind, covered: model.showNowPlaying))
             }
           }
           ForEach(libraryPages, id: \.self) { page in
             if visitedPages.contains(page) {
               libraryPage(page)
-                .modifier(RetainedPage(active: section == page && !model.showNowPlaying))
+                .modifier(RetainedPage(active: section == page, covered: model.showNowPlaying))
             }
           }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -190,7 +190,9 @@ struct ContentView: View {
       searchFocusRequest += 1
     }
     .onPreferenceChange(CatalogDetailPreference.self) { openCatalogDetails = $0 }
-    .onPreferenceChange(SidebarArtworkPreference.self) { backdrop.submit($0) }
+    .onPreferenceChange(SidebarArtworkPreference.self) {
+      if !model.showNowPlaying { backdrop.submit($0) }
+    }
     .toolbar {
       ToolbarItem(placement: .navigation) {
         Button {
