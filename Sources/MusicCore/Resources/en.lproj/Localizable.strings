@@ -295,8 +295,8 @@
 "余音" = "Yuin";
 "关于余音" = "About Yuin";
 "%@ · 开发版" = "%@ · Development";
-"交叉淡化" = "Crossfade";
-"交叉淡化时长" = "Crossfade Duration";
+"切歌淡出" = "Fade Out Previous Song";
+"切歌淡出时长" = "Fade-Out Duration";
 "关闭" = "Off";
 "%@ 秒" = "%@ s";
-"切歌时让两首歌重叠衔接。0 秒关闭，网络缓冲可能缩短实际重叠时间。" = "Overlap songs for smoother transitions. Set to 0 to turn off. Network buffering may shorten the overlap.";
+"新歌曲直接播放，原歌曲按设定时长淡出。0 秒关闭。" = "New songs start at normal volume while the previous song fades out. Set to 0 to turn off.";

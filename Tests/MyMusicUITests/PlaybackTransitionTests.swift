@@ -68,7 +68,7 @@ import XCTest
     XCTAssertTrue(condition(), "Timed out waiting for local playback")
   }
 
-  func testSwitchKeepsOutgoingItemUntilReplacementIsPrepared() async throws {
+  func testDisabledFadeKeepsOutgoingUntilPreparedAndSwitchesAtNormalVolume() async throws {
     let (directory, model, player, resolver, tracks) = try fixture()
     defer {
       resolver.release()
@@ -84,7 +84,7 @@ import XCTest
       "Do not tear down the current item before resolving its replacement")
     try await waitUntil { resolver.pending != nil }
     XCTAssertTrue(player.currentItem === outgoing)
-    try await waitUntil { player.volume < 0.99 }
+    XCTAssertEqual(player.volume, 1, accuracy: 0.001)
     XCTAssertEqual(model.state.volume, 1, "The envelope must not change the saved volume")
     resolver.release()
     try await waitUntil {
@@ -92,7 +92,7 @@ import XCTest
     }
     XCTAssertEqual(model.current?.songID, "b")
     XCTAssertEqual(resolver.calls.filter { $0 == "b:320k" }.count, 1)
-    try await waitUntil { player.volume > 0.99 }
+    XCTAssertEqual(player.volume, 1, accuracy: 0.001, "Zero seconds disables the transition")
   }
 
   func testNextTrackIsPreparedAndQualityChangesDiscardTheOldPreparation() async throws {
@@ -191,13 +191,20 @@ import XCTest
     let overlapStart = ContinuousClock.now
     resolver.release()
     try await waitUntil {
-      resolver.players.last.map { $0.rate > 0 && $0.volume > 0.1 } == true
+      resolver.players.last.map { $0.timeControlStatus == .playing } == true
     }
     let incoming = try XCTUnwrap(resolver.players.last)
+    XCTAssertEqual(
+      incoming.volume, model.state.volume, accuracy: 0.001,
+      "The incoming song must start at the chosen volume without fading in")
     XCTAssertGreaterThan(outgoing.rate, 0)
     XCTAssertGreaterThan(outgoing.volume, 0.1)
+    try await waitUntil { outgoing.volume < 0.9 }
+    XCTAssertEqual(
+      incoming.volume, model.state.volume, accuracy: 0.001,
+      "Only the outgoing song should fade")
     model.setVolume(0.5)
-    XCTAssertLessThanOrEqual(incoming.volume, 0.5)
+    XCTAssertEqual(incoming.volume, 0.5, accuracy: 0.001)
     XCTAssertLessThanOrEqual(outgoing.volume, 0.5)
     try await waitUntil { outgoing.currentItem == nil && incoming.volume > 0.49 }
     XCTAssertGreaterThan(overlapStart.duration(to: .now), .milliseconds(450))
@@ -224,6 +231,7 @@ import XCTest
         && resolver.players.last.map { $0.rate > 0 && $0.volume > 0.05 } == true
     }
     XCTAssertGreaterThan(outgoing.rate, 0, "The next song must start before the old one ends")
+    XCTAssertEqual(resolver.players.last?.volume ?? 0, model.state.volume, accuracy: 0.001)
     XCTAssertLessThan(model.position, 2)
     model.pausePlayback()
     XCTAssertEqual(outgoing.rate, 0)
@@ -245,7 +253,9 @@ import XCTest
     model.play(tracks[0], in: tracks)
     try await waitUntil { first.rate > 0 && !model.isLoadingAudio }
     model.next()
-    try await waitUntil { resolver.players.last.map { $0.rate > 0 && $0.volume > 0.1 } == true }
+    try await waitUntil {
+      resolver.players.last?.timeControlStatus == .playing && first.volume < 0.99
+    }
     let second = try XCTUnwrap(resolver.players.last)
     model.next()
     try await waitUntil { resolver.players.count == 2 && model.isPlaying && !model.isLoadingAudio }

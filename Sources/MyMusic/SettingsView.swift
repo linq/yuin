@@ -27,7 +27,7 @@ struct SettingsView: View {
           .font(.caption).foregroundStyle(.secondary)
       }
       Section(L10n.text("播放与下载")) {
-        LabeledContent(L10n.text("交叉淡化")) {
+        LabeledContent(L10n.text("切歌淡出")) {
           Slider(
             value: Binding(
               get: { model.state.crossfadeSeconds },
@@ -37,7 +37,7 @@ struct SettingsView: View {
               }
             ), in: 0...12, step: 1
           )
-          .accessibilityLabel(L10n.text("交叉淡化时长"))
+          .accessibilityLabel(L10n.text("切歌淡出时长"))
           Text(
             model.state.crossfadeSeconds == 0
               ? L10n.text("关闭") : L10n.text("\(Int(model.state.crossfadeSeconds)) 秒")
@@ -45,7 +45,7 @@ struct SettingsView: View {
           .monospacedDigit().frame(width: 48, alignment: .trailing)
         }
         .accessibilityElement(children: .contain)
-        Text(L10n.text("切歌时让两首歌重叠衔接。0 秒关闭，网络缓冲可能缩短实际重叠时间。"))
+        Text(L10n.text("新歌曲直接播放，原歌曲按设定时长淡出。0 秒关闭。"))
           .font(.caption).foregroundStyle(.secondary)
         if qualities.isEmpty {
           Text(L10n.text("启用音乐源后可选择默认音质。")).foregroundStyle(.secondary)

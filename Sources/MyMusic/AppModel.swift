@@ -108,14 +108,14 @@ import UniformTypeIdentifiers
         self.isPlaying = p.timeControlStatus == .playing
         if self.isPlaying, self.loadedEntryID == self.state.queue.currentID {
           self.isLoadingAudio = false
-          if self.audioGain < 1 && !self.overlapStarted {
+          if (self.tailPlayer != nil || self.audioGain < 1) && !self.overlapStarted {
             let token = self.playGeneration
             self.fadeTask?.cancel()
             self.fadeTask = Task { [weak self] in
-              guard let self else { return }
+              guard let self, !Task.isCancelled, token == self.playGeneration else { return }
               if self.tailPlayer != nil {
                 self.overlapStarted = true
-                try? await self.crossfade(token: token)
+                try? await self.fadeOutgoing(token: token)
               } else {
                 try? await self.fade(to: 1, steps: 12, token: token)
               }
@@ -350,28 +350,11 @@ import UniformTypeIdentifiers
     position = resume
     duration = track.duration
     persist()
-    // With crossfade enabled the outgoing audio keeps playing through preparation.
-    // The disabled path retains the short, non-overlapping transition.
-    let outgoing = Task { [weak self] in
-      guard let self else { return }
-      if wantsOverlap { return }
-      do {
-        if self.player.rate > 0 {
-          try await self.fade(to: 0, steps: 8, token: token)
-        } else {
-          self.audioGain = 0
-          self.player.volume = 0
-        }
-        try Task.checkCancellation()
-        guard token == self.playGeneration else { return }
-        self.player.pause()
-      } catch {}
-    }
-    fadeTask = outgoing
+    // Keep the old song audible while preparing its replacement. A zero duration
+    // switches directly; otherwise only the outgoing voice fades after handoff.
     playTask = Task { [self] in
       do {
         let audio = try await prepareAudio(track, entryID: entryID).value
-        await outgoing.value
         try Task.checkCancellation()
         guard token == playGeneration else { return }
         let item = AVPlayerItem(asset: audio.asset)
@@ -388,13 +371,13 @@ import UniformTypeIdentifiers
               ?? state.crossfadeSeconds)
           removePlaybackObservers()
           player = makePlayer()
-          audioGain = 0
-          player.volume = 0
+          audioGain = 1
+          player.volume = state.volume
           installPlaybackObservers()
         } else {
           player.pause()
-          audioGain = 0
-          player.volume = 0
+          audioGain = 1
+          player.volume = state.volume
         }
         loadedEntryID = entryID
         refreshedEntryID = nil
@@ -490,8 +473,7 @@ import UniformTypeIdentifiers
     }
   }
 
-  private func crossfade(token: UUID) async throws {
-    let initialIncoming = audioGain
+  private func fadeOutgoing(token: UUID) async throws {
     let initialTail = tailGain
     let start = ContinuousClock.now
     // Buffering can consume part of the tail after the new item was attached.
@@ -509,10 +491,8 @@ import UniformTypeIdentifiers
       let elapsed = start.duration(to: .now).components
       let progress = min(
         1, (Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18) / seconds)
-      // Equal-power curves avoid a volume dip at the middle of the overlap.
-      audioGain = initialIncoming + (1 - initialIncoming) * Float(sin(progress * .pi / 2))
+      // The new song starts at normal volume. Only the previous voice fades.
       tailGain = initialTail * Float(cos(progress * .pi / 2))
-      player.volume = state.volume * audioGain
       tailPlayer?.volume = state.volume * tailGain
       if progress >= 1 { break }
       try await Task.sleep(for: .milliseconds(16))
