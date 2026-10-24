@@ -25,6 +25,68 @@ final class CatalogPaginationTests: XCTestCase {
     config.protocolClasses = [CatalogStub.self]
     return MusicCatalog(session: URLSession(configuration: config))
   }
+  func testNeteaseSearchFillsMissingArtworkBySongIDWithoutChangingOrder() async throws {
+    var detailRequests = 0
+    CatalogStub.response = { request in
+      if request.url!.path.contains("song/detail") {
+        detailRequests += 1
+        return Data(
+          #"{"code":200,"songs":[{"id":22,"name":"Detail title","al":{"picUrl":"https://example.com/22.jpg"}},{"id":11,"name":"Detail title","al":{"picUrl":"https://example.com/11.jpg"}}]}"#
+            .utf8)
+      }
+      return Data(
+        #"{"code":200,"result":{"songCount":3,"songs":[{"id":11,"name":"First","artists":[{"name":"Artist"}],"album":{"id":7,"name":"Album","picId":123},"duration":221000},{"id":22,"name":"Second","album":{"id":8}},{"id":33,"name":"Existing","album":{"picUrl":"https://example.com/existing.jpg"}}]}}"#
+          .utf8)
+    }
+    let catalog = catalog()
+    let result = try await catalog.search("红颜", platform: .wy)
+    XCTAssertEqual(result.tracks.map(\.songID), ["11", "22", "33"])
+    XCTAssertEqual(
+      result.tracks.map(\.artwork),
+      [
+        "https://example.com/11.jpg", "https://example.com/22.jpg",
+        "https://example.com/existing.jpg",
+      ])
+    XCTAssertEqual(result.tracks.first?.title, "First")
+    XCTAssertEqual(result.tracks.first?.duration, 221)
+    XCTAssertEqual(result.total, 3)
+    XCTAssertEqual(detailRequests, 1, "Fetch one batch, not one request per search row")
+    _ = try await catalog.search("红颜", platform: .wy)
+    XCTAssertEqual(detailRequests, 1, "Reuse resolved covers for repeated searches")
+  }
+  func testNeteaseArtworkFailureDoesNotDiscardSearchAndCanRetry() async throws {
+    var fail = true
+    CatalogStub.response = { request in
+      if request.url!.path.contains("song/detail") {
+        return Data(
+          (fail
+            ? #"{"code":503}"#
+            : #"{"code":200,"songs":[{"id":11,"al":{"picUrl":"https://example.com/11.jpg"}}]}"#)
+            .utf8)
+      }
+      return Data(
+        #"{"code":200,"result":{"songCount":1,"songs":[{"id":11,"name":"First","album":{"id":7}}]}}"#
+          .utf8)
+    }
+    let catalog = catalog()
+    let first = try await catalog.search("红颜", platform: .wy)
+    XCTAssertEqual(first.tracks.map(\.songID), ["11"])
+    fail = false
+    let retry = try await catalog.search("红颜", platform: .wy)
+    XCTAssertEqual(retry.tracks.first?.artwork, "https://example.com/11.jpg")
+  }
+
+  func testLiveNeteaseSearchContainsDecodableAlbumCovers() async throws {
+    guard ProcessInfo.processInfo.environment["MUSIC_ARTWORK_TESTS"] == "1" else {
+      throw XCTSkip("Set MUSIC_ARTWORK_TESTS=1 to check live search artwork")
+    }
+    let result = try await MusicCatalog().search("红颜", platform: .wy)
+    XCTAssertEqual(result.tracks.count, 30)
+    XCTAssertTrue(result.tracks.allSatisfy { $0.artwork?.isEmpty == false })
+    print(
+      "NETEASE_SEARCH_ARTWORK songs=\(result.tracks.count) covers=\(result.tracks.filter { $0.artwork?.isEmpty == false }.count)"
+    )
+  }
   func testPlaylistSearchMapsPlatformsAndPaginates() async throws {
     for platform in MusicPlatform.allCases {
       CatalogStub.response = { request in

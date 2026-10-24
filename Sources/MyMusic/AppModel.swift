@@ -43,7 +43,7 @@ import UniformTypeIdentifiers
     }
   }
   @Published var nowQuality = ""
-  let catalog = MusicCatalog()
+  let catalog: MusicCatalog
   private let store: LibraryStore
   private var runtime: SourceRuntime?
   private var player: AVPlayer
@@ -54,6 +54,7 @@ import UniformTypeIdentifiers
   private var overlapStarted = false
   private let audioURLResolver: (@MainActor (Track, String) async throws -> URL)?
   private var playTask: Task<Void, Never>?
+  private var artworkTask: Task<Void, Never>?
   private var fadeTask: Task<Void, Never>?
   private let preparation = AudioPreparation()
   private var loadedEntryID: UUID?
@@ -73,11 +74,13 @@ import UniformTypeIdentifiers
   var activeSource: SourceRecord? { state.sources.first { $0.id == state.activeSourceID } }
   init(
     store: LibraryStore = LibraryStore(), startServices: Bool = true,
+    catalog: MusicCatalog = MusicCatalog(),
     player: AVPlayer = AVPlayer(),
     makePlayer: @escaping @MainActor () -> AVPlayer = { AVPlayer() },
     audioURLResolver: (@MainActor (Track, String) async throws -> URL)? = nil
   ) {
     self.store = store
+    self.catalog = catalog
     self.player = player
     self.makePlayer = makePlayer
     self.audioURLResolver = audioURLResolver
@@ -92,6 +95,7 @@ import UniformTypeIdentifiers
     // Rendering/scroll benchmarks use an isolated store without audio or remote commands.
     guard startServices else { return }
     installPlaybackObservers()
+    refreshCurrentArtwork()
     setupRemoteCommands()
     Task { if let source = activeSource { await activate(source) } }
   }
@@ -341,6 +345,7 @@ import UniformTypeIdentifiers
     let token = UUID()
     playGeneration = token
     isLoadingAudio = true
+    refreshCurrentArtwork()
     let resume = state.queue.position
     position = resume
     duration = track.duration
@@ -524,6 +529,7 @@ import UniformTypeIdentifiers
   }
 
   private func stopAudio() {
+    artworkTask?.cancel()
     playTask?.cancel()
     fadeTask?.cancel()
     stopTail()
@@ -537,6 +543,35 @@ import UniformTypeIdentifiers
     loadedEntryID = nil
     audioGain = 1
     player.volume = state.volume
+  }
+
+  func refreshCurrentArtwork() {
+    artworkTask?.cancel()
+    guard let track = current, track.platform == .wy, track.artwork?.isEmpty != false else {
+      return
+    }
+    artworkTask = Task { [weak self, catalog] in
+      guard let enriched = try? await catalog.fillingMissingArtwork(in: [track]).first,
+        !Task.isCancelled, let artwork = enriched.artwork, !artwork.isEmpty,
+        let self, self.current?.id == track.id
+      else { return }
+      // Repair the old copies without replacing queue entries or resetting time.
+      var updated = self.state
+      func repair(_ song: inout Track) {
+        if song.id == track.id, song.artwork?.isEmpty != false { song.artwork = artwork }
+      }
+      for index in updated.queue.entries.indices { repair(&updated.queue.entries[index].track) }
+      for index in updated.history.indices { repair(&updated.history[index]) }
+      for list in updated.playlists.indices {
+        for index in updated.playlists[list].tracks.indices {
+          repair(&updated.playlists[list].tracks[index])
+        }
+      }
+      for index in updated.downloads.indices { repair(&updated.downloads[index].track) }
+      self.state = updated
+      self.persist()
+      self.updateNowPlaying()
+    }
   }
 
   func pausePlayback() {

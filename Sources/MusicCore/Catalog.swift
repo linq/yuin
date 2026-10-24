@@ -3,18 +3,19 @@ import Foundation
 
 public actor MusicCatalog {
   private let session: URLSession
+  private var artworkBySongID: [String: String] = [:]
   public init(session: URLSession = .shared) { self.session = session }
   private func json(
     _ base: String, _ params: [String: String] = [:], body: [String: Any]? = nil,
     referer: String? = nil, headers: [String: String] = [:], qqSign: Bool = false,
-    repairUTF8: Bool = false
+    repairUTF8: Bool = false, timeout: TimeInterval = 20
   ) async throws -> [String: Any] {
     var c = URLComponents(string: base)!
     c.queryItems =
       (c.queryItems ?? [])
       + params.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
     var req = URLRequest(url: c.url!)
-    req.timeoutInterval = 20
+    req.timeoutInterval = timeout
     req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
     req.setValue(referer ?? base, forHTTPHeaderField: "Referer")
     for (key, value) in headers { req.setValue(value, forHTTPHeaderField: key) }
@@ -155,8 +156,54 @@ public actor MusicCatalog {
       items = (song["resultList"] as? [[[String: Any]]] ?? []).flatMap { $0 }
       total = song.int("totalCount")
     }
-    return TrackPage(
-      tracks: Self.unique(items.compactMap { Self.track($0, platform: platform) }), total: total)
+    let tracks = Self.unique(items.compactMap { Self.track($0, platform: platform) })
+    do {
+      return TrackPage(tracks: try await fillingMissingArtwork(in: tracks), total: total)
+    } catch {
+      try Task.checkCancellation()
+      // Artwork is optional metadata: a detail service failure must not erase
+      // otherwise valid search results or prevent playing them.
+      return TrackPage(tracks: tracks, total: total)
+    }
+  }
+
+  /// Legacy NetEase search returns album IDs/pic IDs without a usable picUrl.
+  /// Fill only missing covers in batches, preserving all search/playback metadata.
+  public func fillingMissingArtwork(in tracks: [Track]) async throws -> [Track] {
+    var seen = Set<String>()
+    let missing = tracks.filter {
+      $0.platform == .wy && $0.artwork?.isEmpty != false
+        && artworkBySongID[$0.songID] == nil && (Int64($0.songID) ?? 0) > 0
+        && seen.insert($0.songID).inserted
+    }.map(\.songID)
+    for offset in stride(from: 0, to: missing.count, by: 100) {
+      try Task.checkCancellation()
+      let ids = missing.dropFirst(offset).prefix(100).compactMap(Int64.init)
+      let c = try JSONSerialization.data(withJSONObject: ids.map { ["id": $0] })
+      let rawIDs = try JSONSerialization.data(withJSONObject: ids)
+      let detail = try await json(
+        "https://music.163.com/api/v3/song/detail",
+        [
+          "c": String(decoding: c, as: UTF8.self), "ids": String(decoding: rawIDs, as: UTF8.self),
+        ], referer: "https://music.163.com/", timeout: 5)
+      guard detail.int("code") == 200, detail["songs"] is [[String: Any]] else {
+        throw unavailable(.wy)
+      }
+      if artworkBySongID.count > 512 { artworkBySongID.removeAll() }
+      for song in detail.array("songs") {
+        let artwork = song.object("al", "album").string("picUrl")
+        if !artwork.isEmpty { artworkBySongID[song.string("id")] = artwork }
+      }
+    }
+    try Task.checkCancellation()
+    return tracks.map { track in
+      guard track.platform == .wy, track.artwork?.isEmpty != false,
+        let artwork = artworkBySongID[track.songID]
+      else { return track }
+      var enriched = track
+      enriched.artwork = artwork
+      return enriched
+    }
   }
   /// Search the platform's online playlist catalogue (not just the loaded recommendations).
   public func searchCollections(_ query: String, platform: MusicPlatform, page: Int = 1)
