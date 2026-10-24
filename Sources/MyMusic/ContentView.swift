@@ -32,7 +32,7 @@ struct ContentView: View {
         GeometryReader { geometry in
           if let anchor = anchors[model.showNowPlaying ? .expanded : .mini] {
             let rect = geometry[anchor]
-            Artwork(
+            PlayerArtwork(
               url: model.current?.artwork, size: rect.width,
               radius: model.showNowPlaying ? 10 : 5
             )
@@ -40,10 +40,12 @@ struct ContentView: View {
               color: .black.opacity(model.showNowPlaying ? 0.28 : 0.16),
               radius: model.showNowPlaying ? 20 : 5, y: model.showNowPlaying ? 12 : 2
             )
-            .scaleEffect(model.showNowPlaying && !model.isPlaying ? 0.88 : 1)
+            .scaleEffect(
+              model.showNowPlaying && !(model.isPlaying || model.isLoadingAudio) ? 0.88 : 1
+            )
             .animation(
               reduceMotion ? nil : .spring(response: 0.46, dampingFraction: 0.86),
-              value: model.isPlaying
+              value: model.isPlaying || model.isLoadingAudio
             )
             .position(x: rect.midX, y: rect.midY)
             .animation(

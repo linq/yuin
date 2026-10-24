@@ -44,8 +44,14 @@ import UniformTypeIdentifiers
   let catalog = MusicCatalog()
   private let store: LibraryStore
   private var runtime: SourceRuntime?
-  private let player = AVPlayer()
+  private let player: AVPlayer
+  private let audioURLResolver: (@MainActor (Track, String) async throws -> URL)?
   private var playTask: Task<Void, Never>?
+  private var fadeTask: Task<Void, Never>?
+  private let preparation = AudioPreparation()
+  private var loadedEntryID: UUID?
+  private var refreshedEntryID: UUID?
+  private var audioGain: Float = 1
   private var playGeneration = UUID()
   private var sourceGeneration = UUID()
   private var playerObservation: NSKeyValueObservation?
@@ -58,8 +64,14 @@ import UniformTypeIdentifiers
   private var restoring = false
   var current: Track? { state.queue.current }
   var activeSource: SourceRecord? { state.sources.first { $0.id == state.activeSourceID } }
-  init(store: LibraryStore = LibraryStore(), startServices: Bool = true) {
+  init(
+    store: LibraryStore = LibraryStore(), startServices: Bool = true,
+    player: AVPlayer = AVPlayer(),
+    audioURLResolver: (@MainActor (Track, String) async throws -> URL)? = nil
+  ) {
     self.store = store
+    self.player = player
+    self.audioURLResolver = audioURLResolver
     do { state = try store.load() } catch {
       state = LibraryState()
       saveAllowed = false
@@ -70,20 +82,48 @@ import UniformTypeIdentifiers
     player.volume = state.volume
     // Rendering/scroll benchmarks use an isolated store without audio or remote commands.
     guard startServices else { return }
+    installPlaybackObservers()
+    setupRemoteCommands()
+    Task { if let source = activeSource { await activate(source) } }
+  }
+  private func installPlaybackObservers() {
+    guard playerObservation == nil else { return }
     playerObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
       Task { @MainActor [weak self] in
-        self?.isPlaying = p.timeControlStatus == .playing
-        self?.updateNowPlaying()
+        guard let self else { return }
+        self.isPlaying = p.timeControlStatus == .playing
+        if self.isPlaying, self.loadedEntryID == self.state.queue.currentID {
+          self.isLoadingAudio = false
+          if self.audioGain < 1 {
+            let token = self.playGeneration
+            self.fadeTask?.cancel()
+            self.fadeTask = Task { [weak self] in
+              try? await self?.fade(to: 1, steps: 12, token: token)
+            }
+          }
+          self.prepareUpcomingPlayback()
+        }
+        self.updateNowPlaying()
       }
     }
     timeToken = player.addPeriodicTimeObserver(
       forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
     ) { [weak self] time in
-      Task { @MainActor [weak self] in
-        guard let self, self.player.currentItem != nil else { return }
+      // This callback is explicitly delivered on the main queue. Handle it in
+      // place so an outgoing item's queued tick cannot land on its replacement.
+      MainActor.assumeIsolated {
+        guard let self, self.player.currentItem != nil, !self.isLoadingAudio,
+          self.loadedEntryID == self.state.queue.currentID
+        else { return }
         self.updatePlaybackTime(
           position: time.seconds,
           duration: self.player.currentItem?.duration.seconds ?? 0)
+        if self.duration - self.position > 0, self.duration - self.position <= 15,
+          self.refreshedEntryID != self.loadedEntryID
+        {
+          self.refreshedEntryID = self.loadedEntryID
+          self.prepareUpcomingPlayback()
+        }
         if Date().timeIntervalSince(self.lastPersist) > 5 {
           self.persist()
           self.lastPersist = Date()
@@ -95,13 +135,12 @@ import UniformTypeIdentifiers
       forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main
     ) { [weak self] n in
       Task { @MainActor [weak self] in
-        guard let self, let item = n.object as? AVPlayerItem, item === self.player.currentItem
+        guard let self, let item = n.object as? AVPlayerItem, item === self.player.currentItem,
+          self.loadedEntryID == self.state.queue.currentID, !self.isLoadingAudio
         else { return }
         self.next(automatic: true)
       }
     }
-    setupRemoteCommands()
-    Task { if let source = activeSource { await activate(source) } }
   }
   func updatePlaybackTime(position: Double, duration: Double) {
     if position.isFinite {
@@ -117,8 +156,16 @@ import UniformTypeIdentifiers
     do { try store.save(state) } catch { message = L10n.text("保存失败：\(error.localizedDescription)") }
   }
   func shutdown() {
-    player.pause()
-    playTask?.cancel()
+    stopAudio()
+    if let timeToken {
+      player.removeTimeObserver(timeToken)
+      self.timeToken = nil
+    }
+    if let endToken {
+      NotificationCenter.default.removeObserver(endToken)
+      self.endToken = nil
+    }
+    playerObservation = nil
     downloadTasks.values.forEach { $0.cancel() }
     runtime?.stop()
     persist()
@@ -144,6 +191,7 @@ import UniformTypeIdentifiers
         return
       }
       runtime?.stop()
+      preparation.cancel()
       runtime = candidate
       capabilities = candidate.capabilities
       sourceReady = true
@@ -157,6 +205,7 @@ import UniformTypeIdentifiers
     }
   }
   func disableSource() {
+    preparation.cancel()
     sourceGeneration = UUID()
     runtime?.stop()
     runtime = nil
@@ -203,6 +252,7 @@ import UniformTypeIdentifiers
         return
       }
       if state.activeSourceID == source.id {
+        preparation.cancel()
         runtime?.stop()
         runtime = candidate
         capabilities = candidate.capabilities
@@ -234,62 +284,59 @@ import UniformTypeIdentifiers
     startCurrent()
   }
   func startCurrent() {
-    guard let track = current else { return }
+    guard let track = current, let entryID = state.queue.currentID else { return }
+    installPlaybackObservers()
     playTask?.cancel()
+    fadeTask?.cancel()
     let token = UUID()
     playGeneration = token
-    player.pause()
-    itemObservation = nil
-    player.replaceCurrentItem(with: nil)
-    isPlaying = false
     isLoadingAudio = true
     let resume = state.queue.position
     position = resume
     duration = track.duration
     persist()
-    playTask = Task { [self] in
-      defer { if token == playGeneration { isLoadingAudio = false } }
+    // Fade the audible tail while URL/asset preparation runs concurrently. Keep
+    // the old item attached until the new one is ready to avoid a hard teardown.
+    let outgoing = Task { [weak self] in
+      guard let self else { return }
       do {
-        let url: URL
-        if let file = offlineURL(track) {
-          url = file
-          nowQuality = L10n.text("本地")
+        if self.player.rate > 0 {
+          try await self.fade(to: 0, steps: 8, token: token)
         } else {
-          guard sourceReady else { throw MusicError.message(L10n.text("请先在音乐源页面导入并启用音乐源")) }
-          let q = qualities(for: track)
-          let quality: String?
-          if q.contains(state.playbackQuality) {
-            quality = state.playbackQuality
-          } else if q.contains("128k") {
-            quality = "128k"
-          } else {
-            quality = q.first
-          }
-          guard let quality else {
-            throw MusicError.message(L10n.text("当前音乐源不支持\(track.platform.name)，请在音乐源页面启用或切换源"))
-          }
-          url = try await resolve(track, quality: quality)
-          nowQuality = quality
+          self.audioGain = 0
+          self.player.volume = 0
         }
         try Task.checkCancellation()
-        guard token == playGeneration else { return }
-        let asset = AVURLAsset(url: url)
-        guard try await asset.load(.isPlayable) else {
-          throw MusicError.message(L10n.text("当前系统无法播放此音频格式"))
-        }
+        guard token == self.playGeneration else { return }
+        self.player.pause()
+      } catch {}
+    }
+    fadeTask = outgoing
+    playTask = Task { [self] in
+      do {
+        let audio = try await prepareAudio(track, entryID: entryID).value
+        await outgoing.value
         try Task.checkCancellation()
         guard token == playGeneration else { return }
-        let item = AVPlayerItem(asset: asset)
+        let item = AVPlayerItem(asset: audio.asset)
+        item.preferredForwardBufferDuration = 3
+        loadedEntryID = entryID
+        refreshedEntryID = nil
+        nowQuality = audio.quality
         itemObservation = item.observe(\.status, options: [.new]) { [weak self] item, _ in
           Task { @MainActor [weak self] in
-            guard let self, item === self.player.currentItem else { return }
+            guard let self, item === self.player.currentItem,
+              self.loadedEntryID == self.state.queue.currentID
+            else { return }
             if item.status == .failed {
-              self.message = item.error?.localizedDescription ?? L10n.text("播放失败，请重试")
-              self.isPlaying = false
+              let error = item.error?.localizedDescription ?? L10n.text("播放失败，请重试")
+              self.stopAudio()
+              self.message = error
             }
           }
         }
         player.replaceCurrentItem(with: item)
+        let resume = state.queue.position
         if resume > 0 {
           await player.seek(
             to: CMTime(seconds: resume, preferredTimescale: 600), toleranceBefore: .zero,
@@ -303,10 +350,100 @@ import UniformTypeIdentifiers
         state.history = Array(state.history.prefix(200))
         persist()
         updateNowPlaying()
-      } catch { if token == playGeneration { notify(error) } }
+        prepareUpcomingPlayback()
+      } catch {
+        if token == playGeneration {
+          stopAudio()
+          notify(error)
+        }
+      }
     }
   }
+
+  private func prepareAudio(_ track: Track, entryID: UUID) throws -> Task<
+    AudioPreparation.Audio, Error
+  > {
+    let file = offlineURL(track)
+    let quality: String
+    if file != nil {
+      quality = L10n.text("本地")
+    } else {
+      guard sourceReady else { throw MusicError.message(L10n.text("请先在音乐源页面导入并启用音乐源")) }
+      let supported = qualities(for: track)
+      guard
+        let selected = supported.contains(state.playbackQuality)
+          ? state.playbackQuality
+          : supported.contains("128k") ? "128k" : supported.first
+      else {
+        throw MusicError.message(L10n.text("当前音乐源不支持\(track.platform.name)，请在音乐源页面启用或切换源"))
+      }
+      quality = selected
+    }
+    let key = AudioPreparation.Key(
+      entry: entryID, source: sourceGeneration, quality: quality, file: file)
+    return preparation.prepare(key) { [weak self] in
+      if let file { return file }
+      guard let self else { throw CancellationError() }
+      return try await self.resolve(track, quality: quality)
+    }
+  }
+
+  func prepareUpcomingPlayback() {
+    guard !isLoadingAudio, loadedEntryID == state.queue.currentID, player.currentItem != nil else {
+      return
+    }
+    var queue = state.queue
+    // Do not predict a random choice or consume an explicit play-next priority.
+    guard queue.mode != .shuffle || queue.nextEntryID != nil,
+      queue.advance(automatic: true), let track = queue.current, let id = queue.currentID
+    else {
+      preparation.cancel()
+      return
+    }
+    _ = try? prepareAudio(track, entryID: id)
+  }
+
+  private func fade(to target: Float, steps: Int, token: UUID) async throws {
+    let initial = audioGain
+    for step in 1...steps {
+      try Task.checkCancellation()
+      guard token == playGeneration else { throw CancellationError() }
+      audioGain = initial + (target - initial) * Float(step) / Float(steps)
+      player.volume = state.volume * audioGain
+      try await Task.sleep(for: .milliseconds(16))
+    }
+  }
+
+  private func stopAudio() {
+    playTask?.cancel()
+    fadeTask?.cancel()
+    preparation.cancel()
+    playGeneration = UUID()
+    isLoadingAudio = false
+    isPlaying = false
+    player.pause()
+    itemObservation = nil
+    player.replaceCurrentItem(with: nil)
+    loadedEntryID = nil
+    audioGain = 1
+    player.volume = state.volume
+  }
+
+  func pausePlayback() {
+    if isLoadingAudio {
+      stopAudio()
+    } else {
+      fadeTask?.cancel()
+      player.pause()
+      isPlaying = false
+      audioGain = 1
+      player.volume = state.volume
+    }
+    persist()
+    updateNowPlaying()
+  }
   func resolve(_ track: Track, quality: String) async throws -> URL {
+    if let audioURLResolver { return try await audioURLResolver(track, quality) }
     guard let runtime, sourceReady else { throw MusicError.message(L10n.text("请先导入并启用音乐源")) }
     do { return try await runtime.resolve(track, quality: quality) } catch {
       if runtime.capabilities.isEmpty {
@@ -319,15 +456,17 @@ import UniformTypeIdentifiers
   }
   func togglePlayback() {
     if isLoadingAudio {
-      playTask?.cancel()
-      playGeneration = UUID()
-      isLoadingAudio = false
+      pausePlayback()
       return
     }
-    if isPlaying {
-      player.pause()
-      persist()
-    } else if player.currentItem != nil && player.currentItem?.status != .failed {
+    if isPlaying || player.rate > 0 {
+      pausePlayback()
+    } else if player.currentItem != nil && player.currentItem?.status != .failed,
+      loadedEntryID == state.queue.currentID
+    {
+      isLoadingAudio = true
+      audioGain = 0
+      player.volume = 0
       player.play()
     } else {
       startCurrent()
@@ -336,10 +475,9 @@ import UniformTypeIdentifiers
   func next(backward: Bool = false, automatic: Bool = false) {
     guard state.queue.advance(backward: backward, automatic: automatic) else {
       if automatic {
-        player.pause()
+        stopAudio()
         state.queue.position = 0
         position = 0
-        player.replaceCurrentItem(with: nil)
         persist()
       }
       return
@@ -350,7 +488,7 @@ import UniformTypeIdentifiers
     let value = min(max(0, seconds), max(duration, 0))
     position = value
     state.queue.position = value
-    if player.currentItem != nil {
+    if player.currentItem != nil, loadedEntryID == state.queue.currentID {
       player.seek(to: CMTime(seconds: value, preferredTimescale: 600))
     }
     persist()
@@ -358,17 +496,19 @@ import UniformTypeIdentifiers
   }
   func setVolume(_ value: Float) {
     state.volume = value
-    player.volume = value
+    player.volume = value * audioGain
     persist()
   }
   func enqueue(_ track: Track, next: Bool) {
     state.queue.append(track, next: next)
     persist()
+    prepareUpcomingPlayback()
   }
   func enqueue(_ tracks: [Track], next: Bool) {
     guard !tracks.isEmpty else { return }
     state.queue.append(contentsOf: tracks, next: next)
     persist()
+    prepareUpcomingPlayback()
   }
   func selectQueue(_ id: UUID) {
     guard state.queue.entries.contains(where: { $0.id == id }) else { return }
@@ -380,23 +520,22 @@ import UniformTypeIdentifiers
   func moveUpcoming(from offsets: IndexSet, to destination: Int) {
     state.queue.moveUpcoming(from: offsets, to: destination)
     persist()
+    prepareUpcomingPlayback()
   }
   func playNext(_ id: UUID) {
     state.queue.playNext(id)
     persist()
+    prepareUpcomingPlayback()
   }
   func clearUpcoming() {
     state.queue.clearUpcoming()
     persist()
+    prepareUpcomingPlayback()
   }
   func removeQueue(_ id: UUID) {
     let current = state.queue.currentID == id
     if current {
-      playTask?.cancel()
-      playGeneration = UUID()
-      isLoadingAudio = false
-      player.pause()
-      player.replaceCurrentItem(with: nil)
+      stopAudio()
     }
     state.queue.remove(id)
     if current {
@@ -405,6 +544,7 @@ import UniformTypeIdentifiers
       updateNowPlaying()
     }
     persist()
+    prepareUpcomingPlayback()
   }
   func offlineURL(_ track: Track) -> URL? {
     for job in state.downloads.reversed()
@@ -554,11 +694,7 @@ import UniformTypeIdentifiers
             "before-restore-\(Int(Date().timeIntervalSince1970)).json"))
       }
       restoring = true
-      playTask?.cancel()
-      playGeneration = UUID()
-      isLoadingAudio = false
-      player.pause()
-      player.replaceCurrentItem(with: nil)
+      stopAudio()
       downloadTasks.values.forEach { $0.cancel() }
       let tasks = Array(downloadTasks.values)
       Task {
@@ -585,14 +721,13 @@ import UniformTypeIdentifiers
     center.playCommand.addTarget { [weak self] _ in
       Task { @MainActor [weak self] in
         guard let self else { return }
-        if !self.isPlaying { self.togglePlayback() }
+        if !self.isPlaying && !self.isLoadingAudio { self.togglePlayback() }
       }
       return .success
     }
     center.pauseCommand.addTarget { [weak self] _ in
       Task { @MainActor [weak self] in
-        self?.player.pause()
-        self?.persist()
+        self?.pausePlayback()
       }
       return .success
     }

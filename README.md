@@ -52,9 +52,11 @@ See the [release guide](docs/RELEASING.md) for details. Supporting project docum
 
 The floating player provides playback controls, shuffle and repeat-one modes, seeking, song actions, queue access, and volume. Click its artwork or song title to expand Now Playing. Narrow windows hide some controls, while playback modes remain available in the song menu.
 
+Track changes use short audio fades and preload the next track during sequential playback. Artwork and song information transition smoothly, keeping the previous artwork visible until its replacement has loaded.
+
 Switching away from Search and back within the same window preserves draft keywords, submitted results, loaded pages, selection, and scroll position. Changing platforms elsewhere causes Search to refresh for the new platform when you return. Search sessions are not restored across app restarts.
 
-Keyboard shortcuts: `⌘N` creates a playlist, `⇧⌘I` imports a source, `⌘P` toggles playback, `⌘←` / `⌘→` skips tracks, and `⌘U` toggles the queue. System media controls are supported.
+Keyboard shortcuts: `⌘N` creates a playlist, `⇧⌘I` imports a source, `Space` toggles playback, `⌘←` / `⌘→` skips tracks, and `⌘U` toggles the queue. Space continues to work normally when typing in search or other text fields. System media controls are supported.
 
 ## Data and backups
 

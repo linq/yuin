@@ -24,17 +24,7 @@ struct PlayerBar: View {
             Button {
               model.showNowPlaying = true
             } label: {
-              VStack(alignment: .leading, spacing: 1) {
-                Text(model.current?.title ?? L10n.text("尚未播放"))
-                  .font(.system(size: 13, weight: .medium)).lineLimit(1)
-                Text(
-                  model.current.map {
-                    [$0.artist, $0.album].filter { !$0.isEmpty }.joined(separator: " — ")
-                  }
-                    ?? L10n.text("选择一首歌曲，开始聆听")
-                )
-                .font(.system(size: 11)).foregroundStyle(.primary.opacity(0.72)).lineLimit(1)
-              }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+              PlayerTrackMetadata(track: model.current).contentShape(Rectangle())
             }.buttonStyle(.plain).disabled(model.current == nil)
               .help(
                 model.current.map { "\($0.title)\n\($0.artist) — \($0.album)" }
@@ -143,6 +133,7 @@ private struct PlaybackControls: View {
     Button {
       model.state.queue.mode = model.state.queue.mode == mode ? .sequential : mode
       model.persist()
+      model.prepareUpcomingPlayback()
     } label: {
       Image(systemName: symbol).font(.system(size: large ? 15 : 11, weight: .semibold))
         .foregroundStyle(model.state.queue.mode == mode ? Color.pink : Color.secondary)
@@ -177,6 +168,7 @@ private struct CurrentTrackMenu: View {
             set: {
               model.state.queue.mode = $0
               model.persist()
+              model.prepareUpcomingPlayback()
             })
         ) {
           ForEach(PlaybackMode.allCases, id: \.self) { Text($0.name).tag($0) }
@@ -489,17 +481,7 @@ struct NowPlayingView: View {
   private var controls: some View {
     VStack(alignment: .leading, spacing: 12) {
       HStack(spacing: 8) {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(model.current?.title ?? L10n.text("尚未播放"))
-            .font(.system(size: 17, weight: .semibold)).lineLimit(1)
-            .help(model.current?.title ?? "").textSelection(.enabled)
-          Text(
-            model.current.map {
-              [$0.artist, $0.album].filter { !$0.isEmpty }.joined(separator: " — ")
-            } ?? L10n.text("选择一首歌曲，开始聆听")
-          )
-          .font(.system(size: 15)).foregroundStyle(.white.opacity(0.65)).lineLimit(1)
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        PlayerTrackMetadata(track: model.current, large: true).textSelection(.enabled)
         Button {
           if let track = model.current { model.favorite(track) }
         } label: {

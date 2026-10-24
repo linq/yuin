@@ -76,7 +76,7 @@ import SwiftUI
       CommandMenu(L10n.text("播放")) {
         Button(model.isPlaying ? L10n.text("暂停") : L10n.text("播放")) { model.togglePlayback() }
           .keyboardShortcut(
-            "p", modifiers: [.command])
+            .space, modifiers: [])
         Button(L10n.text("下一首")) { model.next() }.keyboardShortcut(
           .rightArrow, modifiers: [.command])
         Button(L10n.text("上一首")) { model.next(backward: true) }.keyboardShortcut(
