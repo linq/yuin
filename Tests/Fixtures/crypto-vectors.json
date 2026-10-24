@@ -1,0 +1,13 @@
+{
+  "aes": {
+    "plain": "hello",
+    "key": "0123456789abcdef",
+    "iv": "abcdef0123456789",
+    "hex": "ffcb80bec2437fc2e30b0ef0a8ec5b64"
+  },
+  "rsa": {
+    "plain": "hello",
+    "publicKey": "-----BEGIN PUBLIC KEY-----\nMIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDo2yB2WtCIyfguYQmAZ0NHye+n\nGtPLSjwFBQmPnDoOTitkNb5R/XRBB/J5aukuw9O+bc+9YhAdj6iepnux+sVoZCiJ\nS4UhAlDoiC/6FIZ8g95nNxQYiJbNwxUEGG5aOPsRhd9NCh257TyrD+iF3q2b71ve\n318dBtZ80wR+IVFlEQIDAQAB\n-----END PUBLIC KEY-----\n",
+    "hex": "bf9e83301e30a66d4373b6205b0d000877d9d88e2b7681c8f58416f56f8d8c783477215152c60344396756d66cc9dd471ce9b0f843da03f1924662efd185973393d0c5a712eae42814898b43ade204e39cb47aa86f19f56f4fb4a6109d539b858728f5f758e13f4a38760512e0209ea1c99d98c703d3f6adbe59e30eeafb6084"
+  }
+}

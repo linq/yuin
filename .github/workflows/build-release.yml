@@ -1,0 +1,113 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  build:
+    name: Test and package macOS Universal
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      APP_BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(cat VERSION)"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            pattern='^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9][A-Za-z0-9.-]*)?$'
+            [[ "$GITHUB_REF_NAME" =~ $pattern ]] || { echo 'Invalid release tag.' >&2; exit 1; }
+            version="${GITHUB_REF_NAME#v}"
+            [[ "${version%%-*}" == "$(cat VERSION)" ]] || { echo 'Tag must match VERSION.' >&2; exit 1; }
+          else
+            version="$version-dev.${GITHUB_SHA:0:7}"
+          fi
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Run tests
+        run: swift test
+
+      - name: Build Universal application and package ZIP and DMG
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: ./scripts/package-release.sh "$RELEASE_VERSION"
+
+      - name: Upload packaged application
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Yuin-macOS-universal
+          path: dist/releases/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release notes
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Download packages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Yuin-macOS-universal
+          path: dist/releases
+
+      - name: Verify package checksums
+        working-directory: dist/releases
+        run: shasum -a 256 -c ./*.sha256
+
+      - name: Publish release and application packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/releases/* --clobber
+            gh release edit "$RELEASE_TAG" --draft=false
+          else
+            flags=()
+            if [[ "$RELEASE_TAG" == *-* ]]; then
+              flags+=(--prerelease)
+            fi
+            gh release create "$RELEASE_TAG" dist/releases/* \
+              --verify-tag --title "Yuin $RELEASE_TAG" \
+              --generate-notes --notes-file .github/RELEASE_NOTES.md "${flags[@]}"
+          fi
