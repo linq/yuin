@@ -92,6 +92,7 @@ struct TrackTableAppearance: NSViewRepresentable {
     private var scheduled = false
     private var lastWidth: CGFloat = 0
     private var selectionObserver: NSObjectProtocol?
+    private var rowHeightObserver: NSKeyValueObservation?
     private var scrollObserver: NSObjectProtocol?
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
@@ -137,6 +138,14 @@ struct TrackTableAppearance: NSViewRepresentable {
         }
       }
       guard let table, let scroll = table.enclosingScrollView else { return }
+      // SwiftUI can reset rowHeight after a data/filter reload without laying
+      // out this background adapter again. Keep the chosen density authoritative.
+      if rowHeightObserver == nil {
+        rowHeightObserver = table.observe(\.rowHeight, options: [.new]) { [weak self] table, _ in
+          guard let self else { return }
+          self.applyDensity(to: table)
+        }
+      }
       if selectionObserver == nil {
         selectionObserver = NotificationCenter.default.addObserver(
           forName: NSTableView.selectionDidChangeNotification, object: table, queue: .main
@@ -150,8 +159,7 @@ struct TrackTableAppearance: NSViewRepresentable {
           if let table { TrackTableAppearance.updateSelection(in: table) }
         }
       }
-      if table.usesAutomaticRowHeights { table.usesAutomaticRowHeights = false }
-      if abs(table.rowHeight - density.rowHeight) > 0.5 { table.rowHeight = density.rowHeight }
+      applyDensity(to: table)
       TrackTableAppearance.updateSelection(in: table)
       TrackTableAppearance.localizeColumns(in: table)
       MusicScroller.apply(to: scroll)
@@ -191,6 +199,10 @@ struct TrackTableAppearance: NSViewRepresentable {
         }
       }
       table.sizeToFit()
+    }
+    private func applyDensity(to table: NSTableView) {
+      if table.usesAutomaticRowHeights { table.usesAutomaticRowHeights = false }
+      if abs(table.rowHeight - density.rowHeight) > 0.5 { table.rowHeight = density.rowHeight }
     }
     deinit {
       if let selectionObserver { NotificationCenter.default.removeObserver(selectionObserver) }

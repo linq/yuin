@@ -29,10 +29,11 @@ import XCTest
     let tracks = (0..<1000).map {
       Track(platform: .wy, songID: "\($0)", title: "Song \($0)", artist: "Artist", album: "Album")
     }
-    func content() -> some View {
-      TracksView(tracks: tracks).environmentObject(model).defaultAppStorage(preferences)
+    func content(_ songs: [Track]) -> some View {
+      TracksView(tracks: songs, scrollHeader: AnyView(Color.blue.frame(height: 180)))
+        .environmentObject(model).defaultAppStorage(preferences)
     }
-    let host = NSHostingView(rootView: content())
+    let host = NSHostingView(rootView: content(tracks))
     let window = NSWindow(
       contentRect: NSRect(x: -5000, y: -5000, width: 850, height: 450),
       styleMask: [.borderless], backing: .buffered, defer: false)
@@ -43,6 +44,13 @@ import XCTest
     let original = try XCTUnwrap(table(in: host))
     let scroll = try XCTUnwrap(original.enclosingScrollView)
     XCTAssertEqual(original.rect(ofRow: 0).height, 32, accuracy: 1)
+    host.rootView = content(Array(tracks.suffix(2)))
+    try await settle(host)
+    XCTAssertEqual(
+      original.rect(ofRow: 0).height, 32, accuracy: 1,
+      "Filtering or reloading a short list must retain standard density")
+    host.rootView = content(tracks)
+    try await settle(host)
     original.selectRowIndexes([33], byExtendingSelection: false)
     scroll.contentView.scroll(to: NSPoint(x: 0, y: original.rect(ofRow: 30).minY + 4))
     scroll.reflectScrolledClipView(scroll.contentView)
@@ -58,8 +66,17 @@ import XCTest
     var rendered = 0
     original.enumerateAvailableRowViews { _, _ in rendered += 1 }
     XCTAssertLessThan(rendered, 60)
+    TrackListDensity.prepareForChange()
+    preferences.set(TrackListDensity.standard.rawValue, forKey: TrackListDensity.preferenceKey)
+    try await settle(host)
+    XCTAssertEqual(original.row(at: NSPoint(x: 1, y: scroll.contentView.bounds.minY)), row)
+    XCTAssertEqual(original.rect(ofRow: 31).height, 32, accuracy: 1)
+    XCTAssertEqual(original.selectedRowIndexes, [33])
+    TrackListDensity.prepareForChange()
+    preferences.set(TrackListDensity.compact.rawValue, forKey: TrackListDensity.preferenceKey)
+    try await settle(host)
     // A fresh view reads the same saved preference rather than resetting density.
-    let second = NSHostingView(rootView: content())
+    let second = NSHostingView(rootView: content(tracks))
     window.contentView = second
     try await settle(second)
     XCTAssertEqual(try XCTUnwrap(table(in: second)).rect(ofRow: 0).height, 26, accuracy: 1)
