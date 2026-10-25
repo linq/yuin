@@ -95,6 +95,9 @@ struct TrackTableAppearance: NSViewRepresentable {
     private var rowHeightObserver: NSKeyValueObservation?
     private var scrollObserver: NSObjectProtocol?
     private var viewportObserver: NSObjectProtocol?
+    private var visibilityObservers: [NSKeyValueObservation] = []
+    private var visibilityColumns: [ObjectIdentifier] = []
+    private var hiddenColumnIDs: Set<ObjectIdentifier> = []
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
       DispatchQueue.main.async { [weak self] in self?.configure() }
@@ -198,14 +201,13 @@ struct TrackTableAppearance: NSViewRepresentable {
       guard width > 200 else { return }
       let album = table.tableColumns.first { $0.title == L10n.text("专辑") }
       let duration = table.tableColumns.first { $0.title == L10n.text("时长") }
+      applyColumnVisibility(in: table, width: width)
       if abs(width - lastWidth) < 1, album?.isHidden == (width < 700),
         duration?.isHidden == (width < 400)
       {
         return
       }
       lastWidth = width
-      album?.isHidden = width < 700
-      duration?.isHidden = width < 400
       let showAlbum = width >= 700
       // Measure the native table's actual column padding instead of guessing
       // scrollbar/column insets, especially when album or duration is hidden.
@@ -228,6 +230,33 @@ struct TrackTableAppearance: NSViewRepresentable {
         default: break
         }
       }
+    }
+    private func applyColumnVisibility(in table: NSTableView, width: CGFloat) {
+      let columns = table.tableColumns.filter {
+        $0.title == L10n.text("专辑") || $0.title == L10n.text("时长")
+      }
+      hiddenColumnIDs = Set(
+        columns.filter {
+          $0.title == L10n.text("专辑") ? width < 700 : width < 400
+        }.map(ObjectIdentifier.init))
+      let ids = columns.map(ObjectIdentifier.init)
+      if ids != visibilityColumns {
+        visibilityObservers.removeAll()
+        visibilityColumns = ids
+        visibilityObservers = columns.map { column in
+          column.observe(\.isHidden, options: [.new]) { [weak self] column, _ in
+            self?.enforceVisibility(of: column)
+          }
+        }
+      }
+      for column in columns { enforceVisibility(of: column) }
+    }
+    private func enforceVisibility(of column: NSTableColumn) {
+      let hidden = hiddenColumnIDs.contains(ObjectIdentifier(column))
+      // SwiftUI resets native visibility when keyboard selection rebuilds cells.
+      // Correct it in that same setter cycle, before a frame can show album text
+      // where the duration belongs. A queued layout repair is one frame too late.
+      if column.isHidden != hidden { column.isHidden = hidden }
     }
     private func applyDensity(to table: NSTableView) {
       if table.usesAutomaticRowHeights { table.usesAutomaticRowHeights = false }

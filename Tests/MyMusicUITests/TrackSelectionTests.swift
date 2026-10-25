@@ -6,6 +6,142 @@ import XCTest
 @testable import MyMusic
 
 @MainActor final class TrackSelectionTests: XCTestCase {
+  func testArrowKeysKeepDurationColumnAndHorizontalOriginStable() async throws {
+    _ = NSApplication.shared
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = AppModel(
+      store: LibraryStore(url: directory.appendingPathComponent("library.json")),
+      startServices: false)
+    let tracks = (0..<80).map {
+      Track(
+        platform: .wy, songID: "\($0)", title: String(repeating: "█", count: 24) + " \($0)",
+        artist: $0.isMultiple(of: 2) ? "Artist" : "Pimmie、PARTYNEXTDOOR、Drake", album: "Album",
+        duration: Double(180 + $0))
+    }
+    let host = NSHostingView(
+      rootView: TracksView(tracks: tracks, scrollHeader: AnyView(Color.clear.frame(height: 220)))
+        .environmentObject(model))
+    let window = NSWindow(
+      contentRect: NSRect(x: -5000, y: -5000, width: 670, height: 450), styleMask: [.titled],
+      backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = host
+    defer { window.close() }
+    for _ in 0..<20 {
+      host.layoutSubtreeIfNeeded()
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    func find(_ node: NSView) -> NSTableView? {
+      if let table = node as? NSTableView { return table }
+      return node.subviews.lazy.compactMap(find).first
+    }
+    let table = try XCTUnwrap(find(host))
+    let clip = try XCTUnwrap(table.enclosingScrollView?.contentView)
+    table.selectRowIndexes([2], byExtendingSelection: false)
+    window.makeFirstResponder(table)
+    let widths = table.tableColumns.map(\.width)
+    let durationColumn = try XCTUnwrap(
+      table.tableColumns.firstIndex { $0.title == L10n.text("时长") })
+    let albumColumn = try XCTUnwrap(table.tableColumns.first { $0.title == L10n.text("专辑") })
+    var visibleAlbums = 0
+    let albumObserver = albumColumn.observe(\.isHidden, options: [.new]) { column, _ in
+      // Inspect the first main-queue opportunity to draw, before a deferred
+      // appearance adapter can repair an incorrectly unhidden native column.
+      DispatchQueue.main.async { if !column.isHidden { visibleAlbums += 1 } }
+    }
+    defer { withExtendedLifetime(albumObserver) {} }
+    func checkDurationPixels() throws {
+      let rect = clip.convert(
+        table.frameOfCell(atColumn: durationColumn, row: table.selectedRow), from: table)
+      guard clip.bounds.contains(rect) else { return }
+      let bitmap = try XCTUnwrap(clip.bitmapImageRepForCachingDisplay(in: rect))
+      clip.cacheDisplay(in: rect, to: bitmap)
+      let background = try XCTUnwrap(bitmap.colorAt(x: 0, y: 0)?.usingColorSpace(.sRGB))
+      var ink = 0
+      var total = 0
+      for y in (bitmap.pixelsHigh / 5)..<(bitmap.pixelsHigh * 4 / 5) {
+        for x in 0..<bitmap.pixelsWide {
+          let pixel = try XCTUnwrap(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB))
+          let difference = max(
+            abs(pixel.redComponent - background.redComponent),
+            abs(pixel.greenComponent - background.greenComponent),
+            abs(pixel.blueComponent - background.blueComponent))
+          if pixel.alphaComponent > 0.3 && (background.alphaComponent < 0.1 || difference > 0.2) {
+            ink += 1
+          }
+          total += 1
+        }
+      }
+      XCTAssertLessThan(
+        Double(ink) / Double(max(1, total)), 0.40,
+        "The duration area must contain sparse time digits, never a solid song-title pattern")
+    }
+    let origin = clip.bounds.minX
+    var observedOrigins: [CGFloat] = []
+    clip.postsBoundsChangedNotifications = true
+    let observer = NotificationCenter.default.addObserver(
+      forName: NSView.boundsDidChangeNotification, object: clip, queue: .main
+    ) { _ in observedOrigins.append(clip.bounds.minX) }
+    defer { NotificationCenter.default.removeObserver(observer) }
+    var cells = Set<ObjectIdentifier>()
+    var cellObservers: [NSObjectProtocol] = []
+    defer { cellObservers.forEach { NotificationCenter.default.removeObserver($0) } }
+    func observeSongCells() {
+      table.enumerateAvailableRowViews { row, _ in
+        guard let cell = row.view(atColumn: 0) as? NSView,
+          cells.insert(ObjectIdentifier(cell)).inserted
+        else { return }
+        cell.postsFrameChangedNotifications = true
+        cellObservers.append(
+          NotificationCenter.default.addObserver(
+            forName: NSView.frameDidChangeNotification, object: cell, queue: .main
+          ) { _ in
+            guard cell.isDescendant(of: table) else { return }
+            let actual = table.convert(cell.bounds, from: cell)
+            XCTAssertLessThanOrEqual(
+              actual.maxX, table.rect(ofColumn: 0).maxX + 1,
+              "Song hosting cells must not move into other columns, even transiently")
+          })
+      }
+    }
+    observeSongCells()
+    for direction in [1, -1] {
+      for _ in 0..<25 {
+        let oldSelection = table.selectedRow
+        let event = try XCTUnwrap(
+          NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil,
+            characters: direction == 1 ? "\u{F701}" : "\u{F700}",
+            charactersIgnoringModifiers: direction == 1 ? "\u{F701}" : "\u{F700}", isARepeat: false,
+            keyCode: direction == 1 ? 125 : 126))
+        table.keyDown(with: event)
+        XCTAssertEqual(
+          table.selectedRow, oldSelection + direction, "Exercise real native arrow navigation")
+        for _ in 0..<6 {
+          try checkDurationPixels()
+          host.layoutSubtreeIfNeeded()
+          observeSongCells()
+          XCTAssertEqual(
+            clip.bounds.minX, origin, accuracy: 0.5,
+            "Arrow selection must not pan the song/duration columns horizontally")
+          for (actual, expected) in zip(table.tableColumns.map(\.width), widths) {
+            XCTAssertEqual(actual, expected, accuracy: 0.5)
+          }
+          try await Task.sleep(for: .milliseconds(2))
+        }
+      }
+    }
+    for value in observedOrigins {
+      XCTAssertEqual(
+        value, origin, accuracy: 0.5, "No transient horizontal scroll during keyboard navigation")
+    }
+    XCTAssertEqual(
+      visibleAlbums, 0,
+      "Keyboard selection must not briefly reveal album contents in the duration area")
+  }
+
   func testSelectingMixedMetadataDoesNotMoveArtistOrAlbumColumns() async throws {
     _ = NSApplication.shared
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

@@ -55,6 +55,7 @@ import UniformTypeIdentifiers
   private let audioURLResolver: (@MainActor (Track, String) async throws -> URL)?
   private var playTask: Task<Void, Never>?
   private var artworkTask: Task<Void, Never>?
+  private let systemNowPlaying = SystemNowPlaying()
   private var fadeTask: Task<Void, Never>?
   private let preparation = AudioPreparation()
   private var loadedEntryID: UUID?
@@ -97,6 +98,7 @@ import UniformTypeIdentifiers
     installPlaybackObservers()
     refreshCurrentArtwork()
     setupRemoteCommands()
+    updateNowPlaying()
     Task { if let source = activeSource { await activate(source) } }
   }
   private func installPlaybackObservers() {
@@ -190,6 +192,7 @@ import UniformTypeIdentifiers
     do { try store.save(state) } catch { message = L10n.text("保存失败：\(error.localizedDescription)") }
   }
   func shutdown() {
+    systemNowPlaying.cancel()
     stopAudio()
     removePlaybackObservers()
     downloadTasks.values.forEach { $0.cancel() }
@@ -350,6 +353,7 @@ import UniformTypeIdentifiers
     position = resume
     duration = track.duration
     persist()
+    updateNowPlaying()
     // Keep the old song audible while preparing its replacement. A zero duration
     // switches directly; otherwise only the outgoing voice fades after handoff.
     playTask = Task { [self] in
@@ -883,17 +887,8 @@ import UniformTypeIdentifiers
     }
   }
   private func updateNowPlaying() {
-    guard let track = current else {
-      MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
-      return
-    }
-    MPNowPlayingInfoCenter.default().nowPlayingInfo = [
-      MPMediaItemPropertyTitle: track.title, MPMediaItemPropertyArtist: track.artist,
-      MPMediaItemPropertyAlbumTitle: track.album, MPMediaItemPropertyPlaybackDuration: duration,
-      MPNowPlayingInfoPropertyElapsedPlaybackTime: position,
-      MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
-    ]
-    MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
+    systemNowPlaying.update(
+      track: current, position: position, duration: duration, isPlaying: isPlaying)
   }
 }
 
