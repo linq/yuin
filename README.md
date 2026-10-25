@@ -6,7 +6,7 @@ English | [简体中文](README.zh-CN.md)
 
 A native macOS music player inspired by Apple Music, built with SwiftUI, AppKit, and AVPlayer. Yuin supports music search, playlists, charts, downloads, synchronized lyrics, and custom LX-compatible JavaScript music sources.
 
-Yuin is currently a **0.1.0 development release**. Public catalog APIs for five platforms have been checked against live services. A user-provided Hei Music source, v2.2.1-fix, has passed sample checks for local and online import, initialization, playback across all five platforms, downloads, and offline playback. Successful quality requests do not certify the actual bitrate or bit depth of the audio. See the [validation record](docs/STATUS.md) for details.
+Yuin is currently a **0.1.1 development release**. Public catalog APIs for five platforms have been checked against live services. A user-provided Hei Music source, v2.2.1-fix, has passed sample checks for local and online import, initialization, playback across all five platforms, downloads, and offline playback. Successful quality requests do not certify the actual bitrate or bit depth of the audio. See the [validation record](docs/STATUS.md) for details.
 
 ## Download and run
 
@@ -32,7 +32,7 @@ You can also open `Package.swift` in Xcode. Before using `swift run MyMusic` dir
 - Update and commit the root `VERSION` file before pushing a matching version tag. Only the release job receives `contents: write`; no personal access token is required.
 
 ```bash
-./scripts/package-release.sh 0.1.0
+./scripts/package-release.sh 0.1.1
 
 # After updating VERSION to 0.2.0 and committing and pushing that change:
 git tag v0.2.0

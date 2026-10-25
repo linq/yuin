@@ -6,7 +6,7 @@
 
 参考 Apple Music 布局的 macOS 原生音乐应用，使用 SwiftUI、AppKit 和 AVPlayer，支持导入 LX 自定义 JavaScript 音乐源。
 
-当前是 **0.1.0 开发版**。五个平台的公开浏览接口已联网验证；用户提供的 Hei Music 聚合源 v2.2.1-fix 已通过在线/本地导入、初始化、五平台取流播放和下载至离线播放样本验证。各音质请求成功不等于实际码率或位深认证，详见验收记录。
+当前是 **0.1.1 开发版**。五个平台的公开浏览接口已联网验证；用户提供的 Hei Music 聚合源 v2.2.1-fix 已通过在线/本地导入、初始化、五平台取流播放和下载至离线播放样本验证。各音质请求成功不等于实际码率或位深认证，详见验收记录。
 
 ## 运行
 
@@ -30,10 +30,10 @@ open dist/Yuin.app
 - 修改根目录 `VERSION` 并提交，再推送与该版本对应的标签即可发布。只在 Release 发布步骤授予 `contents: write`，无需配置个人访问令牌。
 
 ```bash
-./scripts/package-release.sh 0.1.0
+./scripts/package-release.sh 0.1.1
 # 确认 VERSION 与准备发布的版本一致后：
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 详情见 [构建与发布说明](docs/RELEASING.md)。

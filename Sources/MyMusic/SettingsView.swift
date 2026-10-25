@@ -36,7 +36,7 @@ struct SettingsView: View {
           row("关于") {
             let version =
               Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-              ?? "0.1.0"
+              ?? "0.1.1"
             Text(L10n.text("余音") + "  " + L10n.text("\(version) · 开发版"))
               .foregroundStyle(.secondary)
           }
