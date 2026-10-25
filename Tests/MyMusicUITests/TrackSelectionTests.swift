@@ -151,6 +151,97 @@ import XCTest
       "Selection must not briefly insert a native column header and re-tile the entire playlist: \(frames)"
     )
   }
+  func testScrolledPlaylistSelectionKeepsUnselectedRowsAndColumnsUnchanged() async throws {
+    _ = NSApplication.shared
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = AppModel(
+      store: LibraryStore(url: directory.appendingPathComponent("library.json")),
+      startServices: false)
+    let tracks = (0..<100).map {
+      Track(platform: .wy, songID: "\($0)", title: "Song \($0)", artist: "Artist", album: "Album")
+    }
+    let host = NSHostingView(
+      rootView: TracksView(
+        tracks: tracks,
+        scrollHeader: AnyView(
+          HStack {
+            Color.blue.frame(width: 180, height: 180)
+            VStack {
+              Text("Playlist").font(.title)
+              Button("Play") {}
+            }
+          }.padding(.vertical, 24))
+      ).environmentObject(model))
+    let window = NSWindow(
+      contentRect: NSRect(x: -5000, y: -5000, width: 850, height: 450), styleMask: [.borderless],
+      backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = host
+    defer { window.close() }
+    func settle() async throws {
+      for _ in 0..<16 {
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(10))
+      }
+    }
+    func find(_ view: NSView) -> NSTableView? {
+      if let table = view as? NSTableView { return table }
+      return view.subviews.lazy.compactMap(find).first
+    }
+    try await settle()
+    let table = try XCTUnwrap(find(host))
+    let clip = try XCTUnwrap(table.enclosingScrollView?.contentView)
+    let scroll = try XCTUnwrap(table.enclosingScrollView)
+    clip.scroll(to: NSPoint(x: 0, y: table.rect(ofRow: 20).minY + 4))
+    scroll.reflectScrolledClipView(clip)
+    try await settle()
+    func pixels(_ index: Int) throws -> [NSColor] {
+      let rect = clip.convert(table.rect(ofRow: index), from: table)
+      let bitmap = try XCTUnwrap(clip.bitmapImageRepForCachingDisplay(in: rect))
+      clip.cacheDisplay(in: rect, to: bitmap)
+      return try [12, 40, bitmap.pixelsWide / 2, bitmap.pixelsWide - 60].map {
+        try XCTUnwrap(bitmap.colorAt(x: $0, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB))
+      }
+    }
+    for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+      window.appearance = NSAppearance(named: appearance)
+      try await settle()
+      let baseline = try [24, 25, 26].flatMap(pixels)
+      let widths = table.tableColumns.map(\.width)
+      let origin = clip.bounds.origin
+      let viewport = clip.frame
+      for index in [21, 22, 23, 21] {
+        table.selectRowIndexes([index], byExtendingSelection: false)
+        for frame in 0..<12 {
+          host.layoutSubtreeIfNeeded()
+          XCTAssertFalse(
+            table.usesAlternatingRowBackgroundColors, "Striping must not reappear during selection")
+          XCTAssertNil(
+            table.headerView, "Native headers must not briefly reappear during selection")
+          XCTAssertEqual(clip.bounds.origin.y, origin.y, accuracy: 1)
+          XCTAssertEqual(clip.frame.minY, viewport.minY, accuracy: 1)
+          XCTAssertEqual(clip.frame.height, viewport.height, accuracy: 1)
+          for (actual, expected) in zip(table.tableColumns.map(\.width), widths) {
+            XCTAssertEqual(actual, expected, accuracy: 1, "Selection must not reset column widths")
+          }
+          for (actual, expected) in zip(try [24, 25, 26].flatMap(pixels), baseline) {
+            XCTAssertEqual(
+              actual.redComponent, expected.redComponent, accuracy: 0.02,
+              "Unselected rows changed in frame \(frame)")
+            XCTAssertEqual(
+              actual.greenComponent, expected.greenComponent, accuracy: 0.02,
+              "Unselected rows changed in frame \(frame)")
+            XCTAssertEqual(
+              actual.blueComponent, expected.blueComponent, accuracy: 0.02,
+              "Unselected rows changed in frame \(frame)")
+          }
+          try await Task.sleep(for: .milliseconds(2))
+        }
+        try await settle()
+      }
+    }
+  }
   private final class Rows: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int { 4 }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int)

@@ -34,6 +34,7 @@ struct CollectionScrollHeader: NSViewRepresentable {
     private var originalInsets = NSEdgeInsetsZero
     private var originalAutomaticInsets = true
     private var observer: NSObjectProtocol?
+    private var headerObserver: NSKeyValueObservation?
     private var scheduled = false
     private var inset: CGFloat = 0
     private var lastCollapsed: Bool?
@@ -102,6 +103,11 @@ struct CollectionScrollHeader: NSViewRepresentable {
       originalAutomaticInsets = scroll.contentView.automaticallyAdjustsContentInsets
       scroll.contentView.automaticallyAdjustsContentInsets = false
       table.headerView = nil
+      // Selection updates also reinstall SwiftUI's native header. Remove it in
+      // the same update, before NSScrollView can tile around it for one frame.
+      headerObserver = table.observe(\.headerView, options: [.new]) { table, _ in
+        if table.headerView != nil { table.headerView = nil }
+      }
       let hosting = NSHostingView(rootView: content)
       self.hosting = hosting
       scroll.contentView.addSubview(hosting, positioned: .above, relativeTo: table)
@@ -126,6 +132,7 @@ struct CollectionScrollHeader: NSViewRepresentable {
       }
     }
     func detach() {
+      headerObserver = nil
       if let observer { NotificationCenter.default.removeObserver(observer) }
       observer = nil
       hosting?.removeFromSuperview()

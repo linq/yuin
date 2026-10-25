@@ -93,6 +93,9 @@ struct TracksView: View {
           .accessibilityLabel(L10n.text("\(track.title)的操作"))
         }.width(24)
       }
+      // Keep SwiftUI's own configuration consistent with the native appearance.
+      // Otherwise every selection update briefly restores alternating backgrounds.
+      .alternatingRowBackgrounds(.disabled)
       .background(NativeScrollBoundary(scope: scrollScope, isStart: true))
       .overlay(NativeScrollBoundary(scope: scrollScope, isStart: false).allowsHitTesting(false))
       .background(TrackTableAppearance(selection: selection, scope: scrollScope, density: density))
