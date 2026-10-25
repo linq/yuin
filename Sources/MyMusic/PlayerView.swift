@@ -242,10 +242,17 @@ struct QueueView: View {
   @State private var browsing = false
   @State private var jumpRequest = 0
   @State private var scrollScope = NativeScrollScope()
+  @State private var headerReference = QueueHeaderReference()
   var inPlayer: Bool? = nil
   private var player: Bool { inPlayer ?? model.showNowPlaying }
   private var upcoming: [QueueEntry] { model.state.queue.upcoming }
   var body: some View {
+    GeometryReader { geometry in
+      queueContent(topInset: player ? 0 : geometry.safeAreaInsets.top)
+        .ignoresSafeArea(.container, edges: player ? [] : .top)
+    }
+  }
+  private func queueContent(topInset: CGFloat) -> some View {
     VStack(spacing: 0) {
       ZStack(alignment: .bottomTrailing) {
         List {
@@ -301,15 +308,18 @@ struct QueueView: View {
         .overlay(NativeScrollBoundary(scope: scrollScope, isStart: false).allowsHitTesting(false))
         .background(
           QueueListAppearance(
-            player: player, scope: scrollScope, entryIDs: upcoming.map(\.id),
+            player: player, scope: scrollScope, headerReference: headerReference,
+            headerHeight: QueueHeaderLayout.height + topInset,
+            entryIDs: upcoming.map(\.id),
             active: player
               ? model.showNowPlaying && model.showQueue : !model.showNowPlaying && model.showQueue,
             jumpRequest: jumpRequest, browsingChanged: { browsing = $0 })
         )
-        .safeAreaInset(edge: .top, spacing: 0) {
-          if !player { browserHeader }
+        .overlay(alignment: .top) {
+          if !player {
+            browserHeader(topInset: topInset).frame(height: QueueHeaderLayout.height + topInset)
+          }
         }
-        .modifier(QueueHeaderScrollEffect())
         if browsing {
           Button {
             jumpRequest += 1
@@ -332,12 +342,9 @@ struct QueueView: View {
         Rectangle().fill(MusicSurface.navigationMaterial)
       }
     }
-    .overlay(alignment: .top) {
-      if !player { NavigationToolbarBackdrop() }
-    }
     .accessibilityElement(children: .contain).accessibilityLabel(L10n.text("待播队列"))
   }
-  private var browserHeader: some View {
+  private func browserHeader(topInset: CGFloat) -> some View {
     VStack(spacing: 0) {
       HStack(spacing: 8) {
         queueMode(.repeatOne, symbol: "repeat.1", label: L10n.text("单曲循环"))
@@ -346,9 +353,10 @@ struct QueueView: View {
       header.padding(.horizontal, 16).padding(.bottom, 10)
       Divider()
     }
-    // The list extends beneath this inset: passing artwork colors blur through
-    // the whole control/title region, rather than fading the first visible row.
-    .background(.ultraThinMaterial)
+    .padding(.top, topInset)
+    // The native table adapter supplies the live material underneath these controls.
+    // A SwiftUI material here would cover that native backdrop with a second surface.
+    .background(QueueHeaderAnchor(reference: headerReference))
   }
   private var header: some View {
     HStack(spacing: 12) {

@@ -6,6 +6,8 @@ import SwiftUI
 struct QueueListAppearance: NSViewRepresentable {
   let player: Bool
   var scope: NativeScrollScope? = nil
+  var headerReference: QueueHeaderReference? = nil
+  var headerHeight: CGFloat = QueueHeaderLayout.height
   var entryIDs: [UUID] = []
   var active = true
   var jumpRequest = 0
@@ -14,6 +16,8 @@ struct QueueListAppearance: NSViewRepresentable {
   func updateNSView(_ view: Anchor, context: Context) {
     view.player = player
     view.scope = scope
+    view.headerReference = headerReference
+    view.headerHeight = headerHeight
     view.active = active
     view.browsingChanged = browsingChanged
     view.update(entries: entryIDs, jumpRequest: jumpRequest)
@@ -23,10 +27,14 @@ struct QueueListAppearance: NSViewRepresentable {
   final class Anchor: NSView {
     var player = false
     var scope: NativeScrollScope?
+    var headerReference: QueueHeaderReference?
+    var headerHeight: CGFloat = QueueHeaderLayout.height
     var active = true
     var browsingChanged: (Bool) -> Void = { _ in }
     private weak var scroll: NSScrollView?
     private weak var table: NSTableView?
+    private var headerBackdrop: QueueHeaderBackdrop?
+    private var updatingHeader = false
     private var observer: NSObjectProtocol?
     private var ids: [String] = []
     private var anchorID: String?
@@ -51,6 +59,8 @@ struct QueueListAppearance: NSViewRepresentable {
       }
     }
     private func capture() {
+      guard !updatingHeader else { return }
+      positionHeaderBackdrop()
       guard active, !restoring, let scroll else { return }
       origin = scroll.contentView.bounds.origin
       if let table {
@@ -68,9 +78,53 @@ struct QueueListAppearance: NSViewRepresentable {
         DispatchQueue.main.async { [weak self] in self?.browsingChanged(next) }
       }
     }
+    private func positionHeaderBackdrop() {
+      guard !updatingHeader, let scroll, let clip = scroll.contentView as? MusicTableClipView else {
+        return
+      }
+      updatingHeader = true
+      defer { updatingHeader = false }
+      let height: CGFloat = player ? 0 : headerHeight
+      let firstLayout = clip.headerHeight != height
+      let origin = clip.bounds.origin
+      let wasAtStart = origin.y <= 1
+      // Keep header space in the document range, so its source is an ordinary
+      // table region rather than a separate AppKit content inset.
+      scroll.automaticallyAdjustsContentInsets = false
+      clip.automaticallyAdjustsContentInsets = false
+      if scroll.contentInsets.top != 0 { scroll.contentInsets.top = 0 }
+      if clip.contentInsets.top != 0 { clip.contentInsets.top = 0 }
+      if firstLayout {
+        clip.headerHeight = height
+        scroll.tile()
+        if wasAtStart {
+          clip.scroll(to: NSPoint(x: origin.x, y: -height))
+          scroll.reflectScrolledClipView(clip)
+        }
+      }
+      guard !player else {
+        headerBackdrop?.removeFromSuperview()
+        headerBackdrop = nil
+        return
+      }
+      let backdrop = headerBackdrop ?? QueueHeaderBackdrop(frame: .zero)
+      headerBackdrop = backdrop
+      if backdrop.superview !== clip {
+        clip.addSubview(backdrop, positioned: .above, relativeTo: table)
+      }
+      var rect =
+        headerReference?.view.map { clip.convert($0.bounds, from: $0) }
+        ?? NSRect(
+          x: clip.bounds.minX, y: clip.bounds.minY, width: clip.bounds.width, height: height)
+      rect.size.width = min(rect.width, clip.bounds.width)
+      backdrop.frame = rect
+      if active, let table {
+        backdrop.update(table: table, rect: table.convert(rect, from: clip), revision: revision)
+      }
+    }
     private func startOrigin(in scroll: NSScrollView) -> NSPoint {
       var proposed = scroll.contentView.bounds
-      // Safe-area headers occupy a negative scroll inset. Zero would leave
+      // The header occupies a negative document range. Zero would leave
       // the first song underneath the material instead of below the controls.
       proposed.origin = NSPoint(
         x: 0, y: scroll.contentView.documentRect.minY - max(1024, proposed.height))
@@ -121,6 +175,9 @@ struct QueueListAppearance: NSViewRepresentable {
       capture()
     }
     func detach() {
+      headerBackdrop?.detach()
+      headerBackdrop?.removeFromSuperview()
+      headerBackdrop = nil
       if let observer { NotificationCenter.default.removeObserver(observer) }
       observer = nil
       scroll = nil
@@ -179,6 +236,7 @@ struct QueueListAppearance: NSViewRepresentable {
           }
           if let document = scroll.documentView { clearTables(document) }
           MusicScroller.apply(to: scroll)
+          positionHeaderBackdrop()
           return
         }
         parent = node.superview
