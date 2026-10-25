@@ -6,6 +6,86 @@ import XCTest
 @testable import MyMusic
 
 @MainActor final class TrackSelectionTests: XCTestCase {
+  func testSelectingMixedMetadataDoesNotMoveArtistOrAlbumColumns() async throws {
+    _ = NSApplication.shared
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = AppModel(
+      store: LibraryStore(url: directory.appendingPathComponent("library.json")),
+      startServices: false)
+    let artists = [
+      "周杰伦", "坂本龍一、Jaques Morelenbaum、Judy Kang", "The Mamas & the Papas", "July",
+      "卢律铭、林孝亲、林思妤、保卜 巴督路 Baobu Badulu",
+    ]
+    let tracks = (0..<60).map {
+      Track(
+        platform: .wy, songID: "\($0)", title: "Song \($0)", artist: artists[$0 % artists.count],
+        album: "Long album title \($0)")
+    }
+    let host = NSHostingView(
+      rootView: TracksView(tracks: tracks, scrollHeader: AnyView(Color.clear.frame(height: 220)))
+        .environmentObject(model))
+    let window = NSWindow(
+      contentRect: NSRect(x: -5000, y: -5000, width: 734, height: 500), styleMask: [.borderless],
+      backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = host
+    defer { window.close() }
+    func settle() async throws {
+      for _ in 0..<15 {
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(10))
+      }
+    }
+    func find(_ node: NSView) -> NSTableView? {
+      if let table = node as? NSTableView { return table }
+      return node.subviews.lazy.compactMap(find).first
+    }
+    try await settle()
+    let table = try XCTUnwrap(find(host))
+    let scroll = try XCTUnwrap(table.enclosingScrollView)
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: table.rect(ofRow: 20).minY))
+    scroll.reflectScrolledClipView(scroll.contentView)
+    for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+      window.appearance = NSAppearance(named: appearance)
+      for width in [734.0, 1039, 660, 390, 850] {
+        window.setContentSize(NSSize(width: width, height: 500))
+        try await settle()
+        let lastColumn = try XCTUnwrap(
+          table.tableColumns.indices.last { !table.tableColumns[$0].isHidden })
+        let lastCell = scroll.contentView.convert(table.rect(ofColumn: lastColumn), from: table)
+        XCTAssertLessThanOrEqual(
+          lastCell.maxX, scroll.contentView.bounds.maxX + 1,
+          "The last column must fit without a horizontal scroll")
+        let baseline = table.tableColumns.map(\.width)
+        var changes: [(Int, CGFloat)] = []
+        let observations = table.tableColumns.enumerated().map { index, column in
+          column.observe(\.width, options: [.new]) { column, _ in
+            changes.append((index, column.width))
+          }
+        }
+        for row in [21, 22, 23, 24, 21] {
+          table.selectRowIndexes([row], byExtendingSelection: false)
+          for _ in 0..<12 {
+            for (actual, expected) in zip(table.tableColumns.map(\.width), baseline) {
+              XCTAssertEqual(
+                actual, expected, accuracy: 0.5, "Selection must not move columns at width \(width)"
+              )
+            }
+            host.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(2))
+          }
+        }
+        for (index, width) in changes {
+          XCTAssertEqual(
+            width, baseline[index], accuracy: 0.5,
+            "Even transient native column resizing must not occur on selection")
+        }
+        withExtendedLifetime(observations) {}
+      }
+    }
+  }
+
   func testHistorySelectionKeepsRedBackgroundAfterSwiftUIUpdatesCells() async throws {
     _ = NSApplication.shared
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

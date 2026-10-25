@@ -94,12 +94,16 @@ struct TrackTableAppearance: NSViewRepresentable {
     private var selectionObserver: NSObjectProtocol?
     private var rowHeightObserver: NSKeyValueObservation?
     private var scrollObserver: NSObjectProtocol?
+    private var viewportObserver: NSObjectProtocol?
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
       DispatchQueue.main.async { [weak self] in self?.configure() }
     }
     override func layout() {
       super.layout()
+      scheduleConfiguration()
+    }
+    private func scheduleConfiguration() {
       // SwiftUI also writes column widths during layout; apply our sizing after it settles.
       guard !scheduled else { return }
       scheduled = true
@@ -138,6 +142,11 @@ struct TrackTableAppearance: NSViewRepresentable {
         }
       }
       guard let table, let scroll = table.enclosingScrollView else { return }
+      // The viewport sizing below owns these widths. Native automatic sizing
+      // and sizeToFit redistribute them when selected SwiftUI cells rebuild.
+      if table.columnAutoresizingStyle != .noColumnAutoresizing {
+        table.columnAutoresizingStyle = .noColumnAutoresizing
+      }
       if let clip = scroll.contentView as? MusicTableClipView,
         clip.bottomClearance != FloatingPlayerOverlay.scrollClearance
       {
@@ -164,6 +173,10 @@ struct TrackTableAppearance: NSViewRepresentable {
         ) { [weak table] _ in
           if let table { TrackTableAppearance.updateSelection(in: table) }
         }
+        scroll.contentView.postsFrameChangedNotifications = true
+        viewportObserver = NotificationCenter.default.addObserver(
+          forName: NSView.frameDidChangeNotification, object: scroll.contentView, queue: .main
+        ) { [weak self] _ in self?.scheduleConfiguration() }
       }
       applyDensity(to: table)
       TrackTableAppearance.updateSelection(in: table)
@@ -181,7 +194,7 @@ struct TrackTableAppearance: NSViewRepresentable {
       for column in table.tableColumns where !(column.headerCell is QuietHeaderCell) {
         column.headerCell = QuietHeaderCell(textCell: column.title)
       }
-      let width = bounds.width - (scroll.hasVerticalScroller ? 15 : 0)
+      let width = scroll.contentView.bounds.width
       guard width > 200 else { return }
       let album = table.tableColumns.first { $0.title == L10n.text("专辑") }
       let duration = table.tableColumns.first { $0.title == L10n.text("时长") }
@@ -194,8 +207,19 @@ struct TrackTableAppearance: NSViewRepresentable {
       album?.isHidden = width < 700
       duration?.isHidden = width < 400
       let showAlbum = width >= 700
-      // Native inset tables reserve padding for each visible column, in addition to cell widths.
-      let available = max(190, width - (width < 400 ? 70 : showAlbum ? 180 : 125))
+      // Measure the native table's actual column padding instead of guessing
+      // scrollbar/column insets, especially when album or duration is hidden.
+      let visible = table.tableColumns.enumerated().filter { !$0.element.isHidden }
+      let flexibleNames = [L10n.text("歌曲"), L10n.text("艺人"), L10n.text("专辑")]
+      let fixedWidth = visible.filter { !flexibleNames.contains($0.element.title) }
+        .reduce(CGFloat.zero) { $0 + $1.element.width }
+      let totalWidth = visible.reduce(CGFloat.zero) { $0 + $1.element.width }
+      let right =
+        visible.last.map {
+          scroll.contentView.convert(table.rect(ofColumn: $0.offset), from: table).maxX
+        } ?? width
+      let overhead = max(0, right - totalWidth)
+      let available = max(190, scroll.contentView.bounds.maxX - overhead - fixedWidth)
       for column in table.tableColumns {
         switch column.title {
         case L10n.text("歌曲"): column.width = available * (showAlbum ? 0.48 : 0.67)
@@ -204,7 +228,6 @@ struct TrackTableAppearance: NSViewRepresentable {
         default: break
         }
       }
-      table.sizeToFit()
     }
     private func applyDensity(to table: NSTableView) {
       if table.usesAutomaticRowHeights { table.usesAutomaticRowHeights = false }
@@ -213,6 +236,7 @@ struct TrackTableAppearance: NSViewRepresentable {
     deinit {
       if let selectionObserver { NotificationCenter.default.removeObserver(selectionObserver) }
       if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver) }
+      if let viewportObserver { NotificationCenter.default.removeObserver(viewportObserver) }
     }
   }
   private final class QuietHeaderView: NSTableHeaderView {
