@@ -1,9 +1,77 @@
 import AppKit
+import MusicCore
+import SwiftUI
 import XCTest
 
 @testable import MyMusic
 
 @MainActor final class TrackSelectionTests: XCTestCase {
+  func testHistorySelectionKeepsRedBackgroundAfterSwiftUIUpdatesCells() async throws {
+    _ = NSApplication.shared
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = AppModel(
+      store: LibraryStore(url: directory.appendingPathComponent("library.json")),
+      startServices: false)
+    let tracks = (0..<8).map {
+      Track(platform: .wy, songID: "\($0)", title: "Song \($0)", artist: "Artist", album: "Album")
+    }
+    for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+      let host = NSHostingView(rootView: TrackLibraryView(tracks: tracks).environmentObject(model))
+      let window = NSWindow(
+        contentRect: NSRect(x: -5000, y: -5000, width: 850, height: 400),
+        styleMask: [.borderless], backing: .buffered, defer: false)
+      window.isReleasedWhenClosed = false
+      window.appearance = NSAppearance(named: appearance)
+      window.contentView = host
+      defer { window.close() }
+      func settle() async throws {
+        for _ in 0..<12 {
+          host.layoutSubtreeIfNeeded()
+          try await Task.sleep(for: .milliseconds(20))
+        }
+      }
+      func find(_ view: NSView) -> NSTableView? {
+        if let table = view as? NSTableView { return table }
+        return view.subviews.lazy.compactMap(find).first
+      }
+      try await settle()
+      let table = try XCTUnwrap(find(host))
+      func pixel(_ index: Int) throws -> NSColor {
+        let row = try XCTUnwrap(table.rowView(atRow: index, makeIfNecessary: true))
+        let bitmap = try XCTUnwrap(row.bitmapImageRepForCachingDisplay(in: row.bounds))
+        row.cacheDisplay(in: row.bounds, to: bitmap)
+        return try XCTUnwrap(
+          bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB)
+        )
+      }
+      for indexes: IndexSet in [[1], [2], [0], [0, 2], []] {
+        table.selectRowIndexes(indexes, byExtendingSelection: false)
+        try await settle()
+        for index in 0..<3 {
+          let color = try pixel(index)
+          if indexes.contains(index) {
+            XCTAssertGreaterThan(color.redComponent, color.greenComponent * 2)
+            XCTAssertGreaterThan(color.redComponent, color.blueComponent * 2)
+          } else {
+            XCTAssertLessThan(color.redComponent, color.greenComponent * 1.5 + 0.1)
+          }
+        }
+      }
+      table.selectRowIndexes([1], byExtendingSelection: false)
+      try await settle()
+      host.rootView = TrackLibraryView(
+        tracks: [Track(platform: .wy, songID: "new", title: "New history song", artist: "Artist")]
+          + tracks
+      ).environmentObject(model)
+      try await settle()
+      XCTAssertEqual(
+        table.selectedRowIndexes, [2], "Prepending history must keep the selected song")
+      let moved = try pixel(2)
+      XCTAssertGreaterThan(moved.redComponent, moved.greenComponent * 2)
+      XCTAssertGreaterThan(moved.redComponent, moved.blueComponent * 2)
+    }
+  }
   private final class Rows: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int { 4 }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int)

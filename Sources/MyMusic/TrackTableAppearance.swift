@@ -5,6 +5,8 @@ import SwiftUI
 /// Keep the native table's selection, keyboard navigation and accessibility while adapting its columns.
 struct TrackTableAppearance: NSViewRepresentable {
   @Environment(\.locale) private var locale
+  // Reapply decoration after SwiftUI rebuilds the selected row's hosted cells.
+  var selection: Set<String> = []
   private static let columnNames: [MusicLocalizedText] = ["歌曲", "艺人", "专辑", "时长"]
   static let selectionColor = NSColor(srgbRed: 0.98, green: 0.14, blue: 0.23, alpha: 1)
 

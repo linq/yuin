@@ -111,7 +111,7 @@ struct TracksView: View {
           .accessibilityLabel(L10n.text("\(track.title)的操作"))
         }.width(24)
       }
-      .background(TrackTableAppearance())
+      .background(TrackTableAppearance(selection: selection))
       .background(
         ScrollPositionMemory(
           active: isActive, table: true,
