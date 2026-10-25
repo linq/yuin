@@ -310,7 +310,12 @@ struct QueueView: View {
       }
     }
     .background {
-      if !player { Rectangle().fill(.regularMaterial) }
+      if !player {
+        Rectangle().fill(MusicSurface.navigationMaterial)
+      }
+    }
+    .overlay(alignment: .top) {
+      if !player { NavigationToolbarBackdrop() }
     }
     .accessibilityElement(children: .contain).accessibilityLabel(L10n.text("待播队列"))
   }

@@ -3,6 +3,7 @@ import MusicCore
 import SwiftUI
 
 enum MusicSurface {
+  static let navigationMaterial = Material.regular
   static let content = NSColor(name: nil) { appearance in
     appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
       ? NSColor(srgbRed: 0.12, green: 0.155, blue: 0.175, alpha: 1)
@@ -65,6 +66,17 @@ struct HideWindowToolbarTitle: ViewModifier {
   }
 }
 
+/// Draw only behind this column's toolbar, without covering adjacent columns.
+struct NavigationToolbarBackdrop: View {
+  var body: some View {
+    GeometryReader { geometry in
+      Rectangle().fill(MusicSurface.navigationMaterial)
+        .frame(height: geometry.safeAreaInsets.top)
+        .offset(y: -geometry.safeAreaInsets.top)
+    }.allowsHitTesting(false).accessibilityHidden(true)
+  }
+}
+
 struct SidebarArtworkSample: Equatable, Identifiable {
   let id: String
   let url: String?
@@ -108,7 +120,11 @@ struct SidebarArtworkBackdrop: View {
   var body: some View {
     GeometryReader { geometry in
       ZStack {
-        Color(nsColor: MusicSurface.sidebar)
+        if reduceTransparency {
+          Color(nsColor: MusicSurface.sidebar)
+        } else {
+          Rectangle().fill(MusicSurface.navigationMaterial)
+        }
         if !reduceTransparency {
           // Only the leftmost visible covers contribute, at their actual scroll positions.
           let visible = state.samples.filter {

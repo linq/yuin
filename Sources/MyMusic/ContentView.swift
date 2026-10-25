@@ -70,8 +70,7 @@ struct ContentView: View {
         .accessibilityHidden(true)
       }
       .toolbar(model.showNowPlaying ? .hidden : .visible, for: .windowToolbar)
-      .toolbarBackground(.regularMaterial, for: .windowToolbar)
-      .toolbarBackground(model.showNowPlaying ? .hidden : .visible, for: .windowToolbar)
+      .toolbarBackground(.hidden, for: .windowToolbar)
       .ignoresSafeArea(.container, edges: model.showNowPlaying ? .top : [])
   }
 
@@ -167,6 +166,11 @@ struct ContentView: View {
       }
       .coordinateSpace(name: "musicDetail")
       .background(Color(nsColor: MusicSurface.content))
+      .overlay(alignment: .top) {
+        // Scope toolbar blur to this column; a window-wide material would also
+        // paint over the sidebar's continuous background behind the controls.
+        NavigationToolbarBackdrop()
+      }
       .safeAreaInset(edge: .bottom, spacing: 0) {
         PlayerBar().padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 18)
           .opacity(model.showNowPlaying ? 0 : 1)
