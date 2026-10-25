@@ -245,6 +245,7 @@ struct ContentView: View {
         .accessibilityHidden(model.showNowPlaying)
         .inspectorColumnWidth(min: 240, ideal: QueueWidthPreference.width(), max: 360)
         .background(QueueWidthMemory(active: model.showQueue && !model.showNowPlaying))
+        .background(SidebarDividerCover(visible: !model.showNowPlaying, edge: .leading))
     }
 
     .alert(

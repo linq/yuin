@@ -5,15 +5,15 @@ import SwiftUI
 enum MusicSurface {
   static let navigationMaterial = Material.regular
   static let content = NSColor(name: nil) { appearance in
-    appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-      ? NSColor(srgbRed: 0.12, green: 0.155, blue: 0.175, alpha: 1)
-      : NSColor.white
+    var color = NSColor.white
+    appearance.performAsCurrentDrawingAppearance {
+      if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+        color = NSColor.windowBackgroundColor.usingColorSpace(.sRGB) ?? .darkGray
+      }
+    }
+    return color
   }
-  static let sidebar = NSColor(name: nil) { appearance in
-    appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-      ? NSColor(srgbRed: 0.12, green: 0.155, blue: 0.175, alpha: 1)
-      : NSColor(srgbRed: 0.94, green: 0.945, blue: 0.94, alpha: 1)
-  }
+  static let sidebar = NSColor.windowBackgroundColor
   static let toolbar = NSColor(name: nil) { appearance in
     appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
       ? NSColor(srgbRed: 0.14, green: 0.17, blue: 0.19, alpha: 0.96)

@@ -3,15 +3,19 @@ import SwiftUI
 
 /// Cover only the native divider's paint, retaining its resize hit target and layout.
 struct SidebarDividerCover: NSViewRepresentable {
+  enum Edge { case leading, trailing }
   var visible = true
+  var edge: Edge = .trailing
   func makeNSView(context: Context) -> AnchorView { AnchorView() }
   func updateNSView(_ nsView: AnchorView, context: Context) {
+    nsView.edge = edge
     nsView.coverVisible = visible
     nsView.needsLayout = true
   }
   static func dismantleNSView(_ nsView: AnchorView, coordinator: ()) { nsView.detach() }
 
   final class AnchorView: NSView {
+    var edge: Edge = .trailing
     var coverVisible = true { didSet { updateCover() } }
     private let cover = DividerView()
     private var observation: NSObjectProtocol?
@@ -37,30 +41,42 @@ struct SidebarDividerCover: NSViewRepresentable {
         return
       }
       guard window != nil else { return }
+      var child: NSView = self
       var ancestor = superview
       while let view = ancestor {
-        if let split = view as? NSSplitView, split.isVertical, split.arrangedSubviews.count >= 2 {
-          let panes = split.arrangedSubviews.sorted { $0.frame.minX < $1.frame.minX }
-          let left = panes[0]
-          let right = panes[1]
-          guard !split.isSubviewCollapsed(left), left.frame.width > 1 else {
+        if let split = view as? NSSplitView, split.isVertical,
+          split.arrangedSubviews.count >= 2, split.arrangedSubviews.contains(child)
+        {
+          guard !split.isSubviewCollapsed(child), child.frame.width > 1 else {
             cover.isHidden = true
             return
           }
-          let width = max(0, right.frame.minX - left.frame.maxX)
-          // Keep the paint inside the browser's native split. A window-level
-          // sibling would appear above the player while its dismissal fades.
-          if cover.superview !== split {
-            // Preserve the existing panes while adding a non-layout decoration.
-            split.arrangesAllSubviews = false
-            split.addSubview(cover)
+          // SwiftUI extends the detail pane underneath both adjacent columns.
+          // There may be no gap between arranged frames even though AppKit
+          // still paints a divider. Follow this anchor's own column edge.
+          let pixel = 1 / (window?.backingScaleFactor ?? 2)
+          let width = max(pixel, split.dividerThickness)
+          let x = edge == .trailing ? child.frame.maxX : child.frame.minX - width
+          guard let parent = split.superview else { return }
+          // AppKit regenerates divider/shadow views inside the split. Paint
+          // immediately above that native subtree, below later player siblings.
+          // The decoration never participates in the split's pane layout.
+          if cover.superview !== parent {
+            cover.removeFromSuperview()
+            parent.addSubview(cover, positioned: .above, relativeTo: split)
           }
-          cover.frame = NSRect(
-            x: left.frame.maxX, y: split.bounds.minY, width: width, height: split.bounds.height)
-          cover.isHidden = width == 0
-          cover.needsDisplay = true
+          let localFrame = NSRect(
+            x: x - pixel, y: split.bounds.minY, width: width + 2 * pixel,
+            height: split.bounds.height)
+          let frame = parent.convert(localFrame, from: split)
+          if cover.frame != frame {
+            cover.frame = frame
+            cover.needsDisplay = true
+          }
+          cover.isHidden = false
           return
         }
+        child = view
         ancestor = view.superview
       }
       cover.isHidden = true
@@ -74,6 +90,11 @@ struct SidebarDividerCover: NSViewRepresentable {
   }
 
   private final class DividerView: NSView {
+    override init(frame frameRect: NSRect) {
+      super.init(frame: frameRect)
+      wantsLayer = true
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func draw(_ dirtyRect: NSRect) {
       MusicSurface.content.setFill()

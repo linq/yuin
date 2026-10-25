@@ -6,13 +6,17 @@ import XCTest
 @MainActor final class SidebarDividerPresentationTests: XCTestCase {
   func testRestoringDividerDuringPlayerDismissalStaysBelowPlayer() async throws {
     try await checkDismissal(appearance: .aqua)
+    try await checkDismissal(appearance: .aqua, edge: .leading)
   }
 
   func testDarkPlayerDismissalAndDividerResize() async throws {
     try await checkDismissal(appearance: .darkAqua)
+    try await checkDismissal(appearance: .darkAqua, edge: .leading)
   }
 
-  private func checkDismissal(appearance: NSAppearance.Name) async throws {
+  private func checkDismissal(
+    appearance: NSAppearance.Name, edge: SidebarDividerCover.Edge = .trailing
+  ) async throws {
     _ = NSApplication.shared
     let root = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 300))
     let split = NSSplitView(frame: root.bounds)
@@ -25,8 +29,9 @@ import XCTest
     split.addArrangedSubview(detail)
     root.addSubview(split)
     let anchor = SidebarDividerCover.AnchorView(frame: .zero)
+    anchor.edge = edge
     anchor.coverVisible = false
-    sidebar.addSubview(anchor)
+    (edge == .trailing ? sidebar : detail).addSubview(anchor)
     let window = NSWindow(
       contentRect: NSRect(x: -5000, y: -5000, width: 500, height: 300),
       styleMask: [.borderless], backing: .buffered, defer: false)
