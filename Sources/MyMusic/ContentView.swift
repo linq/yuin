@@ -70,7 +70,7 @@ struct ContentView: View {
         .accessibilityHidden(true)
       }
       .toolbar(model.showNowPlaying ? .hidden : .visible, for: .windowToolbar)
-      .toolbarBackground(.ultraThinMaterial, for: .windowToolbar)
+      .toolbarBackground(.thickMaterial, for: .windowToolbar)
       .toolbarBackground(model.showNowPlaying ? .hidden : .visible, for: .windowToolbar)
       .ignoresSafeArea(.container, edges: model.showNowPlaying ? .top : [])
   }
