@@ -38,7 +38,8 @@ struct SourcesView: View {
         ScrollView {
           LazyVStack(spacing: 10) { ForEach(model.state.sources) { source in sourceCard(source) } }
             .padding(.bottom, 20).accessibilityHidden(!isActive)
-        }.background(ScrollPositionMemory(active: isActive))
+        }.contentMargins(.bottom, FloatingPlayerOverlay.scrollClearance, for: .scrollContent)
+          .background(ScrollPositionMemory(active: isActive))
       }
     }.padding(.horizontal, 32).padding(.top, 24)
       .toolbar {

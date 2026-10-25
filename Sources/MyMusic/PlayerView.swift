@@ -247,14 +247,6 @@ struct QueueView: View {
   private var upcoming: [QueueEntry] { model.state.queue.upcoming }
   var body: some View {
     VStack(spacing: 0) {
-      if !player {
-        HStack(spacing: 8) {
-          queueMode(.repeatOne, symbol: "repeat.1", label: L10n.text("单曲循环"))
-          queueMode(.shuffle, symbol: "shuffle", label: L10n.text("随机播放"))
-        }.padding(.horizontal, 12).padding(.top, 14).padding(.bottom, 14)
-        header.padding(.horizontal, 16).padding(.bottom, 10)
-        Divider()
-      }
       ZStack(alignment: .bottomTrailing) {
         List {
           if player {
@@ -312,7 +304,12 @@ struct QueueView: View {
             player: player, scope: scrollScope, entryIDs: upcoming.map(\.id),
             active: player
               ? model.showNowPlaying && model.showQueue : !model.showNowPlaying && model.showQueue,
-            jumpRequest: jumpRequest, browsingChanged: { browsing = $0 }))
+            jumpRequest: jumpRequest, browsingChanged: { browsing = $0 })
+        )
+        .safeAreaInset(edge: .top, spacing: 0) {
+          if !player { browserHeader }
+        }
+        .modifier(QueueHeaderScrollEffect())
         if browsing {
           Button {
             jumpRequest += 1
@@ -339,6 +336,19 @@ struct QueueView: View {
       if !player { NavigationToolbarBackdrop() }
     }
     .accessibilityElement(children: .contain).accessibilityLabel(L10n.text("待播队列"))
+  }
+  private var browserHeader: some View {
+    VStack(spacing: 0) {
+      HStack(spacing: 8) {
+        queueMode(.repeatOne, symbol: "repeat.1", label: L10n.text("单曲循环"))
+        queueMode(.shuffle, symbol: "shuffle", label: L10n.text("随机播放"))
+      }.padding(.horizontal, 12).padding(.top, 14).padding(.bottom, 14)
+      header.padding(.horizontal, 16).padding(.bottom, 10)
+      Divider()
+    }
+    // The list extends beneath this inset: passing artwork colors blur through
+    // the whole control/title region, rather than fading the first visible row.
+    .background(.ultraThinMaterial)
   }
   private var header: some View {
     HStack(spacing: 12) {

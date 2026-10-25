@@ -138,6 +138,12 @@ struct TrackTableAppearance: NSViewRepresentable {
         }
       }
       guard let table, let scroll = table.enclosingScrollView else { return }
+      if let clip = scroll.contentView as? MusicTableClipView,
+        clip.bottomClearance != FloatingPlayerOverlay.scrollClearance
+      {
+        clip.bottomClearance = FloatingPlayerOverlay.scrollClearance
+        scroll.reflectScrolledClipView(clip)
+      }
       // SwiftUI can reset rowHeight after a data/filter reload without laying
       // out this background adapter again. Keep the chosen density authoritative.
       if rowHeightObserver == nil {

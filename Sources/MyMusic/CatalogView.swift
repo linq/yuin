@@ -273,6 +273,7 @@ struct CatalogView: View {
         }.padding(.top, 28).padding(.bottom, 24)
           .accessibilityHidden(!isActive || collection != nil)
       }.scrollContentBackground(.hidden)
+        .contentMargins(.bottom, FloatingPlayerOverlay.scrollClearance, for: .scrollContent)
         .background(NativeScrollBoundary(scope: gridScrollScope, isStart: true))
         .overlay(
           NativeScrollBoundary(scope: gridScrollScope, isStart: false).allowsHitTesting(false)

@@ -177,12 +177,7 @@ struct ContentView: View {
         // paint over the sidebar's continuous background behind the controls.
         NavigationToolbarBackdrop()
       }
-      .safeAreaInset(edge: .bottom, spacing: 0) {
-        PlayerBar().padding(.horizontal, 18).padding(.top, 6).padding(.bottom, 18)
-          .opacity(model.showNowPlaying ? 0 : 1)
-          .allowsHitTesting(!model.showNowPlaying)
-          .accessibilityHidden(model.showNowPlaying)
-      }
+      .modifier(FloatingPlayerOverlay())
 
     }
     .background(WindowChrome())

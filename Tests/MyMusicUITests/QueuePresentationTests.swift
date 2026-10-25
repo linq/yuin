@@ -105,6 +105,15 @@ import XCTest
     let table = try XCTUnwrap(find(host, NSTableView.self))
     let scroll = try XCTUnwrap(table.enclosingScrollView)
     XCTAssertEqual(table.numberOfRows, 99)
+    XCTAssertGreaterThanOrEqual(
+      scroll.frame.height, host.bounds.height - 2,
+      "The queue must scroll under its material header rather than stop below it")
+    XCTAssertGreaterThanOrEqual(
+      scroll.contentView.frame.height, host.bounds.height - 2,
+      "The native viewport must continue behind the header so its material can blur passing rows")
+    let firstRow = table.convert(table.rect(ofRow: 0), to: host)
+    XCTAssertGreaterThan(
+      firstRow.minY, 70, "At the start, the first song clears the overlaid controls")
     XCTAssertEqual(table.draggingDestinationFeedbackStyle, .gap)
     let id = model.state.queue.upcoming[30].id
     scroll.contentView.scroll(to: NSPoint(x: 0, y: table.rect(ofRow: 30).minY + 3))
@@ -121,6 +130,15 @@ import XCTest
     let index = try XCTUnwrap(model.state.queue.upcoming.firstIndex { $0.id == id })
     XCTAssertEqual(scroll.contentView.bounds.minY, table.rect(ofRow: index).minY + 3, accuracy: 1)
     XCTAssertLessThan(table.rows(in: scroll.contentView.bounds).length, 20)
+    let adapter = try XCTUnwrap(find(host, QueueListAppearance.Anchor.self))
+    adapter.update(entries: model.state.queue.upcoming.map(\.id), jumpRequest: 1)
+    try await settle()
+    let returnedFirstRow = table.convert(table.rect(ofRow: 0), to: host)
+    XCTAssertGreaterThan(
+      returnedFirstRow.minY, 70,
+      "Return to Up Next must place the first song below the material controls")
+    XCTAssertLessThan(returnedFirstRow.minY, 120)
+
   }
 
   func testQueueWidthPreferenceUsesCompactDefaultAndClampsSavedWidth() {

@@ -43,7 +43,7 @@ struct QueueListAppearance: NSViewRepresentable {
       ids = next
       if self.jumpRequest != jumpRequest {
         self.jumpRequest = jumpRequest
-        origin = .zero
+        origin = scroll.map { startOrigin(in: $0) } ?? .zero
         anchorID = nil
         restoreAfterLayout()
       } else if changed, scroll != nil {
@@ -62,11 +62,19 @@ struct QueueListAppearance: NSViewRepresentable {
           anchorID = nil
         }
       }
-      let next = origin.y > 60
+      let next = origin.y - startOrigin(in: scroll).y > 60
       if browsing != next {
         browsing = next
         DispatchQueue.main.async { [weak self] in self?.browsingChanged(next) }
       }
+    }
+    private func startOrigin(in scroll: NSScrollView) -> NSPoint {
+      var proposed = scroll.contentView.bounds
+      // Safe-area headers occupy a negative scroll inset. Zero would leave
+      // the first song underneath the material instead of below the controls.
+      proposed.origin = NSPoint(
+        x: 0, y: scroll.contentView.documentRect.minY - max(1024, proposed.height))
+      return scroll.contentView.constrainBoundsRect(proposed).origin
     }
     private func restoreAfterLayout() {
       revision += 1

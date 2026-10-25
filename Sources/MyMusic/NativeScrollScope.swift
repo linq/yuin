@@ -64,16 +64,25 @@ struct NativeScrollBoundary: NSViewRepresentable {
 /// content inset, which AppKit treats as a permanent noninteractive top band.
 final class MusicTableClipView: NSClipView {
   var headerHeight: CGFloat = 0
+  var bottomClearance: CGFloat = 0
   override var documentRect: NSRect {
     var rect = super.documentRect
     rect.origin.y -= headerHeight
     rect.size.height += headerHeight
+    if bottomClearance > 0, let table = documentView as? NSTableView, table.numberOfRows > 0 {
+      let lastRowEnd = table.rect(ofRow: table.numberOfRows - 1).maxY
+      rect.size.height = max(rect.height, lastRowEnd + bottomClearance - rect.minY)
+    }
     return rect
   }
   override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
     var rect = super.constrainBoundsRect(proposedBounds)
     if headerHeight > 0, proposedBounds.minY < 0 {
       rect.origin.y = max(-headerHeight, proposedBounds.minY)
+    }
+    if bottomClearance > 0, proposedBounds.minY > rect.minY {
+      let limit = max(documentRect.minY, documentRect.maxY - proposedBounds.height)
+      rect.origin.y = min(limit, proposedBounds.minY)
     }
     return rect
   }

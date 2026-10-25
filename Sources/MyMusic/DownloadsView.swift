@@ -64,6 +64,7 @@ struct DownloadsView: View {
             }.padding(.vertical, 3).tag(job.id)
           }
         }.listStyle(.inset)
+          .contentMargins(.bottom, FloatingPlayerOverlay.scrollClearance, for: .scrollContent)
           .background(ScrollPositionMemory(active: isActive, table: true))
           .accessibilityHidden(!isActive)
       }
