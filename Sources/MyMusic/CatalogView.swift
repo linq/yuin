@@ -48,6 +48,7 @@ struct CatalogView: View {
   @State private var batchTracks: [Track] = []
   @State private var downloadSheet = false
   @State private var displayedPlatform: MusicPlatform?
+  @State private var availableWidth: CGFloat = 1000
   private var showingTracks: Bool { kind == .search || collection != nil }
   private var page: Int { showingTracks ? trackPage : browsePage }
   private var error: String? { showingTracks ? trackError : browseError }
@@ -75,6 +76,9 @@ struct CatalogView: View {
           .padding(.top, collection == nil ? 20 : 24)
         }
       }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onChange(of: geometry.size.width, initial: true) { _, width in
+          if abs(availableWidth - width) > 1 { availableWidth = width }
+        }
     }
     .background {
       if isActive, showingTracks {
@@ -110,7 +114,7 @@ struct CatalogView: View {
               placeholder: L10n.text("搜索歌单"), accessibilityName: L10n.text("搜索歌单"),
               focusesOnAppear: false, submit: search
             )
-            .frame(width: 220, height: 32)
+            .frame(width: min(360, max(220, availableWidth - 320)), height: 38)
           }
         }
         ToolbarItem(id: "catalog-platform-" + kind.rawValue, placement: .primaryAction) {
@@ -149,7 +153,7 @@ struct CatalogView: View {
     HStack(spacing: 8) {
       CatalogSearchField(text: $query, focusRequest: searchFocusRequest, submit: search)
       if busy { ProgressView().controlSize(.mini) }
-    }.frame(width: 300, height: 32)
+    }.frame(width: min(480, max(240, availableWidth - 320)), height: 38)
   }
 
   private var platformPicker: some View {
@@ -229,15 +233,17 @@ struct CatalogView: View {
         }
       }.padding(.top, 28).padding(.bottom, 24)
         .accessibilityHidden(!isActive || collection != nil)
-    }.background(
-      ScrollPositionMemory(
-        active: isActive && collection == nil,
-        rowIDs: collections.map(\.id), contentCount: collections.count,
-        loadMore: kind == .playlists && collection == nil && hasMoreCollections
-          && !busy && browseError == nil && !collections.isEmpty
-          ? { load(reset: false) } : nil)
-    )
-    .id("\(displayedPlatform?.rawValue ?? ""):\(submitted)")
+    }.scrollContentBackground(.hidden)
+      .modifier(CatalogScrollEdge())
+      .background(
+        ScrollPositionMemory(
+          active: isActive && collection == nil,
+          rowIDs: collections.map(\.id), contentCount: collections.count,
+          loadMore: kind == .playlists && collection == nil && hasMoreCollections
+            && !busy && browseError == nil && !collections.isEmpty
+            ? { load(reset: false) } : nil)
+      )
+      .id("\(displayedPlatform?.rawValue ?? ""):\(submitted)")
   }
 
   private func collectionHeader(_ item: MusicCollection, artworkSize: CGFloat) -> some View {
@@ -549,6 +555,16 @@ struct CatalogView: View {
   private func dedup(_ tracks: [Track]) -> [Track] {
     var seen = Set<String>()
     return tracks.filter { seen.insert($0.id).inserted }
+  }
+}
+
+private struct CatalogScrollEdge: ViewModifier {
+  @ViewBuilder func body(content: Content) -> some View {
+    if #available(macOS 26, *) {
+      content.scrollEdgeEffectStyle(.soft, for: .top)
+    } else {
+      content
+    }
   }
 }
 

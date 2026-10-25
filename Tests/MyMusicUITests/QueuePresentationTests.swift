@@ -90,7 +90,7 @@ import XCTest
     model.queueInspectorIsPresented = false
     XCTAssertFalse(model.showQueue)
   }
-  func testQueueScrollbarsBlendOnlyInsideThePlayer() {
+  func testQueueScrollbarsBlendWithBothQueueBackdrops() {
     let scroll = NSScrollView()
     scroll.hasVerticalScroller = true
     scroll.identifier = NSUserInterfaceItemIdentifier("MyMusic.playerQueue")
@@ -99,7 +99,7 @@ import XCTest
     XCTAssertFalse(scroll.verticalScroller!.isOpaque)
     scroll.identifier = NSUserInterfaceItemIdentifier("MyMusic.sidebarQueue")
     MusicScroller.apply(to: scroll)
-    XCTAssertFalse((scroll.verticalScroller as? MusicScroller)!.blendsWithBackdrop)
+    XCTAssertTrue((scroll.verticalScroller as? MusicScroller)!.blendsWithBackdrop)
   }
 
   func testPlayerQueuePreservesBackdropAtOuterEdge() async throws {

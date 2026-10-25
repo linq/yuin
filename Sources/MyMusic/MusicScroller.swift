@@ -29,7 +29,8 @@ final class MusicScroller: NSScroller {
       scroll.scrollerStyle = NSScroller.preferredScrollerStyle
     }
     if scroll.borderType != .noBorder { scroll.borderType = .noBorder }
-    let blended = scroll.identifier?.rawValue == "MyMusic.playerQueue"
+    let blended = ["MyMusic.playerQueue", "MyMusic.sidebarQueue"].contains(
+      scroll.identifier?.rawValue ?? "")
     guard let original = scroll.verticalScroller else { return }
     if let existing = original as? MusicScroller {
       existing.blendsWithBackdrop = blended

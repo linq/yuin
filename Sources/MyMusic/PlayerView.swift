@@ -243,7 +243,14 @@ struct QueueView: View {
   private var upcoming: [QueueEntry] { model.state.queue.upcoming }
   var body: some View {
     VStack(spacing: 0) {
-      if !player { header.padding(14) }
+      if !player {
+        HStack(spacing: 8) {
+          queueMode(.repeatOne, symbol: "repeat.1", label: L10n.text("单曲循环"))
+          queueMode(.shuffle, symbol: "shuffle", label: L10n.text("随机播放"))
+        }.padding(.horizontal, 12).padding(.top, 14).padding(.bottom, 14)
+        header.padding(.horizontal, 16).padding(.bottom, 10)
+        Divider()
+      }
       ScrollViewReader { proxy in
         List {
           if player {
@@ -251,28 +258,15 @@ struct QueueView: View {
               .listRowInsets(EdgeInsets(top: 0, leading: -8, bottom: 0, trailing: 8))
               .listRowBackground(Color.clear).listRowSeparator(.visible)
               .listRowSeparatorTint(.white.opacity(0.12)).id("queue-start")
-          } else if let id = model.state.queue.currentID,
-            let entry = model.state.queue.entries.first(where: { $0.id == id })
-          {
-            Section(L10n.text("正在播放")) {
-              QueueTrackRow(entry: entry, current: true, player: player).id(id).listRowBackground(
-                Color.clear)
-            }
-          }
-          if !player {
-            Text(
-              model.state.queue.mode == .shuffle
-                ? L10n.text("随机选播 · \(upcoming.count)") : L10n.text("接下来 · \(upcoming.count)")
-            )
-            .font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
-            .listRowBackground(Color.clear)
           }
           ForEach(upcoming) { entry in
             QueueTrackRow(entry: entry, player: player).id(entry.id)
               .listRowBackground(Color.clear)
-              .listRowInsets(EdgeInsets(top: 0, leading: player ? -8 : 8, bottom: 0, trailing: 8))
-              .listRowSeparatorTint(player ? .white.opacity(0.10) : .primary.opacity(0.08))
-              .alignmentGuide(.listRowSeparatorLeading) { _ in player ? 46 : 40 }
+              .listRowInsets(
+                EdgeInsets(top: 0, leading: player ? -8 : -10, bottom: 0, trailing: player ? 8 : 4)
+              )
+              .listRowSeparatorTint(player ? .white.opacity(0.10) : .primary.opacity(0.12))
+              .alignmentGuide(.listRowSeparatorLeading) { _ in 46 }
           }
           .onMove { offsets, target in model.moveUpcoming(from: offsets, to: target) }
           if upcoming.isEmpty {
@@ -315,32 +309,41 @@ struct QueueView: View {
           .font(.caption2).foregroundStyle(.secondary).padding(10)
       }
     }
-    .background(player ? Color.clear : Color(nsColor: MusicSurface.content))
+    .background {
+      if !player { Rectangle().fill(.regularMaterial) }
+    }
     .accessibilityElement(children: .contain).accessibilityLabel(L10n.text("待播队列"))
   }
   private var header: some View {
     HStack(spacing: 12) {
       Text(L10n.text("待播队列")).font(.system(size: player ? 15 : 14, weight: .semibold))
       Spacer(minLength: 0)
-      Button(player ? L10n.text("清除") : L10n.text("清除待播")) { model.clearUpcoming() }
-        .buttonStyle(.plain).font(.system(size: player ? 13 : 11))
-        .foregroundStyle(player ? Color.pink : .secondary)
+      Button(L10n.text("清除")) { model.clearUpcoming() }
+        .buttonStyle(.plain).font(.system(size: 13))
+        .foregroundStyle(Color(nsColor: TrackTableAppearance.selectionColor))
         .disabled(upcoming.isEmpty).help(L10n.text("保留正在播放和播放历史"))
-      if !player {
-        Button {
-          model.showQueue = false
-        } label: {
-          Image(systemName: "xmark")
-        }
-        .buttonStyle(.plain).foregroundStyle(.secondary)
-        .help(L10n.text("关闭队列")).accessibilityLabel(L10n.text("关闭队列"))
-      }
     }
+  }
+  private func queueMode(_ mode: PlaybackMode, symbol: String, label: String) -> some View {
+    let selected = model.state.queue.mode == mode
+    return Button {
+      model.state.queue.mode = selected ? .sequential : mode
+      model.persist()
+      model.prepareUpcomingPlayback()
+    } label: {
+      Image(systemName: symbol).font(.system(size: 17, weight: .medium))
+        .foregroundStyle(
+          selected ? Color(nsColor: TrackTableAppearance.selectionColor) : Color.secondary
+        )
+        .frame(maxWidth: .infinity, minHeight: 36)
+        .background(Color.primary.opacity(selected ? 0.10 : 0.045), in: Capsule())
+    }.buttonStyle(.plain).help(label).accessibilityLabel(label)
+      .accessibilityValue(selected ? L10n.text("已开启") : L10n.text("已关闭"))
   }
   private func scrollToStart(_ proxy: ScrollViewProxy) {
     if player {
       proxy.scrollTo("queue-start", anchor: .top)
-    } else if let id = model.state.queue.currentID {
+    } else if let id = upcoming.first?.id {
       proxy.scrollTo(id, anchor: .top)
     }
   }
@@ -354,15 +357,18 @@ private struct QueueTrackRow: View {
   var player = false
   @State private var hovered = false
   var body: some View {
-    HStack(spacing: player ? 12 : 8) {
-      Artwork(url: entry.track.artwork, size: player ? 34 : 32, radius: 4)
+    HStack(spacing: 12) {
+      Artwork(url: entry.track.artwork, size: 34, radius: 5)
+        .overlay(
+          RoundedRectangle(cornerRadius: 5).strokeBorder(
+            Color.primary.opacity(0.12), lineWidth: 0.5))
       VStack(alignment: .leading, spacing: 3) {
-        Text(entry.track.title).font(.system(size: player ? 14 : 12)).lineLimit(1)
+        Text(entry.track.title).font(.system(size: 14)).lineLimit(1)
           .foregroundStyle(current ? Color.pink : .primary)
         Text(
           [entry.track.artist, entry.track.album].filter { !$0.isEmpty }.joined(separator: " — ")
         )
-        .font(.system(size: player ? 12 : 11)).foregroundStyle(.secondary).lineLimit(1)
+        .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
       }.frame(maxWidth: .infinity, alignment: .leading)
       if current {
         PlaybackStateIcon(isLoading: model.isLoadingAudio, isPlaying: model.isPlaying).frame(
@@ -374,9 +380,9 @@ private struct QueueTrackRow: View {
         Image(systemName: "ellipsis")
       }
       .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 20)
-      .foregroundStyle(.secondary).tint(.secondary).opacity(hovered ? 1 : 0.35)
+      .foregroundStyle(.secondary).tint(.secondary).opacity(hovered ? 1 : 0.7)
       .accessibilityLabel(L10n.text("\(entry.track.title)的队列操作"))
-    }.padding(.vertical, player ? 7 : 4).contentShape(Rectangle())
+    }.padding(.vertical, 7).contentShape(Rectangle())
       .onHover { hovered = $0 }
       .onTapGesture(count: 2) { model.selectQueue(entry.id) }
       .contextMenu { actions }.help("\(entry.track.title) — \(entry.track.artist)")
