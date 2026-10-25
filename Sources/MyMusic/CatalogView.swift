@@ -1,7 +1,7 @@
 import MusicCore
 import SwiftUI
 
-private enum CollectionAction: Equatable {
+enum CollectionAction: Equatable {
   case play, shuffle, playNext, enqueue, save
   case add(UUID)
   case download
@@ -49,6 +49,8 @@ struct CatalogView: View {
   @State private var downloadSheet = false
   @State private var displayedPlatform: MusicPlatform?
   @State private var availableWidth: CGFloat = 1000
+  @State private var gridScrollScope = NativeScrollScope()
+  @State private var detailHeaderCollapsed = false
   private var showingTracks: Bool { kind == .search || collection != nil }
   private var page: Int { showingTracks ? trackPage : browsePage }
   private var error: String? { showingTracks ? trackError : browseError }
@@ -66,14 +68,14 @@ struct CatalogView: View {
         }
         if showingTracks {
           VStack(alignment: .leading, spacing: 12) {
-            if let collection {
+            if let collection, tracks.isEmpty {
               collectionHeader(
                 collection, artworkSize: min(180, max(120, geometry.size.height * 0.38)))
             }
             if let error, tracks.isEmpty { errorView(error) }
-            trackResults
+            trackResults(artworkSize: min(180, max(120, geometry.size.height * 0.38)))
           }
-          .padding(.top, collection == nil ? 20 : 24)
+          .padding(.top, collection == nil ? 20 : tracks.isEmpty ? 24 : 0)
         }
       }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: geometry.size.width, initial: true) { _, width in
@@ -81,7 +83,7 @@ struct CatalogView: View {
         }
     }
     .background {
-      if isActive, showingTracks {
+      if isActive, showingTracks, !detailHeaderCollapsed {
         GeometryReader { geometry in
           Color.clear.preference(
             key: SidebarArtworkPreference.self,
@@ -115,6 +117,20 @@ struct CatalogView: View {
               focusesOnAppear: false, submit: search
             )
             .frame(width: min(360, max(220, availableWidth - 320)), height: 38)
+          }
+        }
+        if let collection, detailHeaderCollapsed {
+          ToolbarItem(id: "collapsed-collection", placement: .principal) {
+            HStack(spacing: 8) {
+              Artwork(url: collection.artwork, size: 26, radius: 4)
+              Text(collection.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+              Button {
+                fullCollection(collection, action: .play)
+              } label: {
+                Image(systemName: "play.fill").frame(width: 28, height: 28)
+              }.buttonStyle(.plain).disabled(actionBusy || tracks.isEmpty)
+                .accessibilityLabel(L10n.text("播放"))
+            }.frame(maxWidth: max(100, min(360, availableWidth - 320)))
           }
         }
         ToolbarItem(id: "catalog-platform-" + kind.rawValue, placement: .primaryAction) {
@@ -190,10 +206,7 @@ struct CatalogView: View {
           }.padding(.horizontal, 32)
         }
         if let browseError { errorView(browseError) }
-        LazyVGrid(
-          columns: [GridItem(.adaptive(minimum: 190), spacing: 20)],
-          alignment: .leading, spacing: 26
-        ) {
+        CollectionGrid {
           ForEach(collections) { item in
             CollectionCard(
               collection: item, saved: isSaved(item), lists: model.state.playlists,
@@ -218,7 +231,7 @@ struct CatalogView: View {
               }
             }
           }
-        }.padding(.horizontal, 32)
+        }
         if busy && collection == nil { ProgressView().padding() }
         if kind == .playlists && !collections.isEmpty && hasMoreCollections {
           Text(busy ? L10n.text("正在载入…") : L10n.text("滚动到底部自动载入更多歌单"))
@@ -234,10 +247,12 @@ struct CatalogView: View {
       }.padding(.top, 28).padding(.bottom, 24)
         .accessibilityHidden(!isActive || collection != nil)
     }.scrollContentBackground(.hidden)
+      .background(NativeScrollBoundary(scope: gridScrollScope, isStart: true))
+      .overlay(NativeScrollBoundary(scope: gridScrollScope, isStart: false).allowsHitTesting(false))
       .modifier(CatalogScrollEdge())
       .background(
         ScrollPositionMemory(
-          active: isActive && collection == nil,
+          active: isActive && collection == nil, scope: gridScrollScope,
           rowIDs: collections.map(\.id), contentCount: collections.count,
           loadMore: kind == .playlists && collection == nil && hasMoreCollections
             && !busy && browseError == nil && !collections.isEmpty
@@ -246,9 +261,15 @@ struct CatalogView: View {
       .id("\(displayedPlatform?.rawValue ?? ""):\(submitted)")
   }
 
-  private func collectionHeader(_ item: MusicCollection, artworkSize: CGFloat) -> some View {
+  private func collectionHeader(_ item: MusicCollection, artworkSize: CGFloat, inset: CGFloat = 32)
+    -> some View
+  {
     let saved = isSaved(item)
-    return HStack(alignment: .center, spacing: 24) {
+    let layout =
+      availableWidth < 560
+      ? AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
+      : AnyLayout(HStackLayout(alignment: .center, spacing: 24))
+    return layout {
       Artwork(url: item.artwork, size: artworkSize, radius: 9)
         .shadow(color: .black.opacity(0.15), radius: 10, y: 4)
       VStack(alignment: .leading, spacing: 10) {
@@ -297,10 +318,10 @@ struct CatalogView: View {
           }
         }
       }.frame(maxWidth: .infinity, alignment: .leading)
-    }.padding(.horizontal, 32).padding(.bottom, 8)
+    }.padding(.horizontal, inset).padding(.bottom, 8)
   }
 
-  @ViewBuilder private var trackResults: some View {
+  @ViewBuilder private func trackResults(artworkSize: CGFloat) -> some View {
     if tracks.isEmpty {
       if busy {
         ProgressView(L10n.text("正在获取歌曲…")).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -320,7 +341,10 @@ struct CatalogView: View {
       TracksView(
         tracks: tracks, ranked: collection?.isChart == true,
         loadMore: tracks.count < total && !busy && trackError == nil
-          ? { load(reset: false) } : nil
+          ? { load(reset: false) } : nil,
+        scrollHeader: collection.map {
+          AnyView(collectionHeader($0, artworkSize: artworkSize, inset: 8).padding(.top, 24))
+        }, headerCollapsed: { detailHeaderCollapsed = $0 }
       )
       .padding(.horizontal, 24)
       HStack {
@@ -354,6 +378,7 @@ struct CatalogView: View {
 
   private func open(_ item: MusicCollection) {
     cancelAction()
+    detailHeaderCollapsed = false
     collection = item
     total = 0
     load(reset: true)
@@ -364,6 +389,7 @@ struct CatalogView: View {
     generation = UUID()
     cancelAction()
     busy = false
+    detailHeaderCollapsed = false
     collection = nil
     tracks = []
     trackError = nil
@@ -377,6 +403,7 @@ struct CatalogView: View {
     generation = UUID()
     cancelAction()
     busy = false
+    detailHeaderCollapsed = false
     collection = nil
     tracks = []
     collections = []
@@ -568,7 +595,7 @@ private struct CatalogScrollEdge: ViewModifier {
   }
 }
 
-private struct CollectionCard: View {
+struct CollectionCard: View {
   @Environment(\.locale) private var locale
   let collection: MusicCollection
   let saved: Bool
@@ -640,8 +667,7 @@ private struct CollectionCard: View {
       Button(action: open) {
         VStack(alignment: .leading, spacing: 3) {
           HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text(collection.title).font(.system(size: 13, weight: .medium)).lineLimit(
-              2, reservesSpace: true)
+            Text(collection.title).font(.system(size: 13)).lineLimit(2)
             if saved {
               Image(systemName: "checkmark.circle.fill").font(.caption).foregroundStyle(.secondary)
             }

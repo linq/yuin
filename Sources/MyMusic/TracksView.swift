@@ -9,6 +9,9 @@ struct TracksView: View {
   var ranked = false
   var loadMore: (() -> Void)? = nil
   var remove: (([Track]) -> Void)? = nil
+  var scrollHeader: AnyView? = nil
+  var headerCollapsed: (Bool) -> Void = { _ in }
+  @State private var scrollScope = NativeScrollScope()
   @State private var selection = Set<String>()
   @State private var downloadTracks: [Track] = []
   @State private var showDownload = false
@@ -28,31 +31,7 @@ struct TracksView: View {
     let rankByID = ranked ? ranks : [:]
     let currentID = model.current?.id
     return VStack(spacing: 6) {
-      HStack(spacing: 8) {
-        Image(systemName: "line.3.horizontal.decrease").foregroundStyle(.secondary)
-        TextField(L10n.text("筛选已载入的歌曲"), text: $filter).textFieldStyle(.plain)
-          .font(.system(size: 12)).frame(maxWidth: 210).accessibilityLabel(L10n.text("筛选已载入的歌曲"))
-        if !filter.isEmpty {
-          Button {
-            filter = ""
-          } label: {
-            Image(systemName: "xmark.circle.fill")
-          }
-          .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel(L10n.text("清除歌曲筛选"))
-          Text(L10n.text("\(displayedTracks.count) 首")).font(.caption).foregroundStyle(.secondary)
-        }
-        Spacer(minLength: 8)
-        Menu {
-          Picker(L10n.text("排序"), selection: $order) {
-            ForEach(TrackDisplayOrder.allCases, id: \.self) { Text($0.name).tag($0) }
-          }
-        } label: {
-          Label(order.name, systemImage: "arrow.up.arrow.down")
-        }
-        .menuStyle(.borderlessButton).fixedSize().font(.system(size: 11))
-        .foregroundStyle(.secondary).tint(.secondary).help(
-          ranked ? L10n.text("调整显示顺序，保留原始榜单名次") : L10n.text("调整显示顺序"))
-      }.padding(.horizontal, 8).frame(height: 26)
+      if scrollHeader == nil { filterControls }
       Table(displayedTracks, selection: $selection) {
         TableColumn(L10n.text("歌曲")) { track in
           HStack(spacing: 8) {
@@ -111,10 +90,23 @@ struct TracksView: View {
           .accessibilityLabel(L10n.text("\(track.title)的操作"))
         }.width(24)
       }
-      .background(TrackTableAppearance(selection: selection))
+      .background(NativeScrollBoundary(scope: scrollScope, isStart: true))
+      .overlay(NativeScrollBoundary(scope: scrollScope, isStart: false).allowsHitTesting(false))
+      .background(TrackTableAppearance(selection: selection, scope: scrollScope))
+      .background {
+        if let scrollHeader {
+          CollectionScrollHeader(
+            content: AnyView(
+              VStack(spacing: 12) {
+                scrollHeader
+                filterControls
+              }.padding(.bottom, 8).environment(\.locale, locale).environmentObject(model)
+            ), active: isActive, scope: scrollScope, collapsed: headerCollapsed)
+        }
+      }
       .background(
         ScrollPositionMemory(
-          active: isActive, table: true,
+          active: isActive, table: true, scope: scrollScope,
           rowIDs: displayedTracks.map(\.id), contentCount: tracks.count,
           loadMore: filter.isEmpty ? loadMore : nil)
       )
@@ -152,6 +144,35 @@ struct TracksView: View {
     .onChange(of: tracks.map(\.id)) { _, ids in selection.formIntersection(Set(ids)) }
     .sheet(isPresented: $showDownload) { DownloadSheet(tracks: downloadTracks) }
   }
+  private var filterControls: some View {
+    let displayedTracks = visibleTracks
+    return HStack(spacing: 8) {
+      Image(systemName: "line.3.horizontal.decrease").foregroundStyle(.secondary)
+      TextField(L10n.text("筛选已载入的歌曲"), text: $filter).textFieldStyle(.plain)
+        .font(.system(size: 12)).frame(maxWidth: 210).accessibilityLabel(L10n.text("筛选已载入的歌曲"))
+      if !filter.isEmpty {
+        Button {
+          filter = ""
+        } label: {
+          Image(systemName: "xmark.circle.fill")
+        }
+        .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel(L10n.text("清除歌曲筛选"))
+        Text(L10n.text("\(displayedTracks.count) 首")).font(.caption).foregroundStyle(.secondary)
+      }
+      Spacer(minLength: 8)
+      Menu {
+        Picker(L10n.text("排序"), selection: $order) {
+          ForEach(TrackDisplayOrder.allCases, id: \.self) { Text($0.name).tag($0) }
+        }
+      } label: {
+        Label(order.name, systemImage: "arrow.up.arrow.down")
+      }
+      .menuStyle(.borderlessButton).fixedSize().font(.system(size: 11))
+      .foregroundStyle(.secondary).tint(.secondary).help(
+        ranked ? L10n.text("调整显示顺序，保留原始榜单名次") : L10n.text("调整显示顺序"))
+    }.padding(.horizontal, 8).frame(height: 26)
+  }
+
 }
 struct TrackMenu: View {
   @Environment(\.locale) private var locale
@@ -274,12 +295,17 @@ struct PlaylistView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
           } else {
-            TracksView(tracks: list.tracks) { songs in
-              guard let i = model.state.playlists.firstIndex(where: { $0.id == id }) else { return }
-              let ids = Set(songs.map(\.id))
-              model.state.playlists[i].tracks.removeAll { ids.contains($0.id) }
-              model.persist()
-            }.padding(.horizontal, 24)
+            TracksView(
+              tracks: list.tracks,
+              remove: { songs in
+                guard let i = model.state.playlists.firstIndex(where: { $0.id == id }) else {
+                  return
+                }
+                let ids = Set(songs.map(\.id))
+                model.state.playlists[i].tracks.removeAll { ids.contains($0.id) }
+                model.persist()
+              }
+            ).padding(.horizontal, 24)
           }
         }
       }

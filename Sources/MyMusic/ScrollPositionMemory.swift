@@ -5,11 +5,13 @@ import SwiftUI
 struct ScrollPositionMemory: NSViewRepresentable {
   let active: Bool
   var table = false
+  var scope: NativeScrollScope? = nil
   var rowIDs: [String] = []
   var contentCount = 0
   var loadMore: (() -> Void)?
   func makeNSView(context: Context) -> AnchorView { AnchorView() }
   func updateNSView(_ view: AnchorView, context: Context) {
+    view.scope = scope
     view.requiresTable = table
     view.setActive(active)
     view.updateContent(rowIDs: rowIDs, count: contentCount, loadMore: loadMore)
@@ -18,6 +20,7 @@ struct ScrollPositionMemory: NSViewRepresentable {
   static func dismantleNSView(_ view: AnchorView, coordinator: ()) { view.detach() }
 
   final class AnchorView: NSView {
+    var scope: NativeScrollScope?
     var requiresTable = false
     private weak var scrollView: NSScrollView?
     private var observer: NSObjectProtocol?
@@ -105,6 +108,7 @@ struct ScrollPositionMemory: NSViewRepresentable {
       }
     }
     private func findScrollView(in view: NSView) -> NSScrollView? {
+      if let scope { return scope.resolve(table: requiresTable) }
       var candidates: [(NSScrollView, CGFloat)] = []
       func containsTable(_ node: NSView?) -> Bool {
         guard let node else { return false }
@@ -171,11 +175,13 @@ struct ScrollPositionMemory: NSViewRepresentable {
         !requestScheduled, nearEnd
       else { return }
       requestScheduled = true
+      // NSTableView can revise estimated row heights before the next run loop.
+      // Keep the observed end-of-list intent even if its document grows meanwhile.
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
         self.requestScheduled = false
         guard self.active, !self.restoring, self.requestedCount != self.contentCount,
-          self.nearEnd, let loadMore = self.loadMore
+          let loadMore = self.loadMore
         else { return }
         self.requestedCount = self.contentCount
         loadMore()

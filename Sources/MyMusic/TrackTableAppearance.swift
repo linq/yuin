@@ -7,8 +7,15 @@ struct TrackTableAppearance: NSViewRepresentable {
   @Environment(\.locale) private var locale
   // Reapply decoration after SwiftUI rebuilds the selected row's hosted cells.
   var selection: Set<String> = []
+  var scope: NativeScrollScope? = nil
   private static let columnNames: [MusicLocalizedText] = ["歌曲", "艺人", "专辑", "时长"]
   static let selectionColor = NSColor(srgbRed: 0.98, green: 0.14, blue: 0.23, alpha: 1)
+
+  static func supplementaryHeader(for table: NSTableView) -> NSTableHeaderView {
+    let header = QuietHeaderView(frame: NSRect(x: 0, y: 0, width: table.bounds.width, height: 24))
+    header.tableView = table
+    return header
+  }
 
   static func updateSelection(in table: NSTableView) {
     if table.selectionHighlightStyle != .none { table.selectionHighlightStyle = .none }
@@ -63,8 +70,12 @@ struct TrackTableAppearance: NSViewRepresentable {
     }
   }
   func makeNSView(context: Context) -> Anchor { Anchor() }
-  func updateNSView(_ view: Anchor, context: Context) { view.needsLayout = true }
+  func updateNSView(_ view: Anchor, context: Context) {
+    view.scope = scope
+    view.needsLayout = true
+  }
   final class Anchor: NSView {
+    var scope: NativeScrollScope?
     private weak var table: NSTableView?
     private var scheduled = false
     private var lastWidth: CGFloat = 0
@@ -100,13 +111,17 @@ struct TrackTableAppearance: NSViewRepresentable {
           }
           return nil
         }
-        var ancestor = superview
-        while let parent = ancestor {
-          if let found = find(parent) {
-            table = found
-            break
+        if let scope {
+          table = scope.resolve(table: true)?.documentView as? NSTableView
+        } else {
+          var ancestor = superview
+          while let parent = ancestor {
+            if let found = find(parent) {
+              table = found
+              break
+            }
+            ancestor = parent.superview
           }
-          ancestor = parent.superview
         }
       }
       guard let table, let scroll = table.enclosingScrollView else { return }
