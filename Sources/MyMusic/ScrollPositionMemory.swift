@@ -6,6 +6,7 @@ struct ScrollPositionMemory: NSViewRepresentable {
   let active: Bool
   var table = false
   var scope: NativeScrollScope? = nil
+  var layoutKey: String? = nil
   var rowIDs: [String] = []
   var contentCount = 0
   var loadMore: (() -> Void)?
@@ -14,6 +15,7 @@ struct ScrollPositionMemory: NSViewRepresentable {
     view.scope = scope
     view.requiresTable = table
     view.setActive(active)
+    view.updateLayoutKey(layoutKey)
     view.updateContent(rowIDs: rowIDs, count: contentCount, loadMore: loadMore)
     view.refreshAppearance()
   }
@@ -24,6 +26,8 @@ struct ScrollPositionMemory: NSViewRepresentable {
     var requiresTable = false
     private weak var scrollView: NSScrollView?
     private var observer: NSObjectProtocol?
+    private var densityObserver: NSObjectProtocol?
+    private var layoutKey: String?
     private var active = true
     private var restoring = false
     private var point: NSPoint?
@@ -56,6 +60,14 @@ struct ScrollPositionMemory: NSViewRepresentable {
       restoring = false
       revision += 1
       if value { restoreAfterLayout(revision) }
+    }
+    func updateLayoutKey(_ value: String?) {
+      let changed = layoutKey != nil && layoutKey != value
+      layoutKey = value
+      if changed && active {
+        revision += 1
+        restoreAfterLayout(revision)
+      }
     }
     func updateContent(rowIDs newIDs: [String], count: Int, loadMore: (() -> Void)?) {
       self.loadMore = loadMore
@@ -91,6 +103,15 @@ struct ScrollPositionMemory: NSViewRepresentable {
       while let parent = ancestor {
         if let scroll = findScrollView(in: parent) {
           scrollView = scroll
+          if requiresTable {
+            densityObserver = NotificationCenter.default.addObserver(
+              forName: .trackListDensityWillChange, object: nil, queue: .main
+            ) { [weak self] _ in
+              guard let self, self.active else { return }
+              self.capture()
+              self.restoring = true
+            }
+          }
           MusicScroller.apply(to: scroll)
           scroll.contentView.postsBoundsChangedNotifications = true
           observer = NotificationCenter.default.addObserver(
@@ -165,7 +186,8 @@ struct ScrollPositionMemory: NSViewRepresentable {
       if let anchorRow, let table = scroll.documentView as? NSTableView,
         anchorRow < table.numberOfRows
       {
-        target.y = table.rect(ofRow: anchorRow).minY + rowInset
+        let rect = table.rect(ofRow: anchorRow)
+        target.y = rect.minY + min(rowInset, max(0, rect.height - 1))
       }
       scroll.contentView.scroll(to: target)
       scroll.reflectScrolledClipView(scroll.contentView)
@@ -197,10 +219,15 @@ struct ScrollPositionMemory: NSViewRepresentable {
     func detach() {
       if let observer { NotificationCenter.default.removeObserver(observer) }
       observer = nil
+      if let densityObserver { NotificationCenter.default.removeObserver(densityObserver) }
+      densityObserver = nil
       scrollView = nil
       revision += 1
       restoring = false
     }
-    deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+    deinit {
+      if let observer { NotificationCenter.default.removeObserver(observer) }
+      if let densityObserver { NotificationCenter.default.removeObserver(densityObserver) }
+    }
   }
 }

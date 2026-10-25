@@ -308,3 +308,15 @@
 "重启后恢复待播队列，但不会自动播放。" = "The queue is restored after relaunch without starting playback.";
 "播放设置" = "Playback";
 "音质" = "Quality";
+"标准" = "Standard";
+"紧凑" = "Compact";
+"歌曲列表密度" = "Song List Density";
+"在歌单中查找" = "Find in Playlist";
+"在排行榜中查找" = "Find in Chart";
+"在最近播放中查找" = "Find in Recently Played";
+"在列表中查找" = "Find in List";
+"在搜索结果中查找" = "Find in Search Results";
+"排序与显示选项" = "Sort and View Options";
+"更多操作" = "More Actions";
+"%@ / %@ 首歌曲" = "%@ / %@ songs";
+"仅查找已载入的歌曲" = "Find within loaded songs";

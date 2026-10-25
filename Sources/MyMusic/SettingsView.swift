@@ -6,6 +6,7 @@ struct SettingsView: View {
   @Environment(\.locale) private var locale
   @EnvironmentObject var model: AppModel
   @AppStorage(MusicLanguage.preferenceKey) private var language: MusicLanguage = .system
+  @AppStorage(TrackListDensity.preferenceKey) private var density: TrackListDensity = .standard
   @AppStorage("appearanceMode") private var appearance: MusicAppearance = .system
   private var qualities: [String] {
     let available = Set(model.capabilities.values.flatMap(\.qualitys))
@@ -31,6 +32,21 @@ struct SettingsView: View {
               }.labelsHidden().frame(width: 220)
               note("默认跟随 macOS 语言，切换后立即生效。")
             }
+          }
+          Divider().gridCellUnsizedAxes(.horizontal)
+          row("歌曲列表密度") {
+            Picker(
+              L10n.text("歌曲列表密度"),
+              selection: Binding(
+                get: { density },
+                set: {
+                  guard density != $0 else { return }
+                  TrackListDensity.prepareForChange()
+                  density = $0
+                })
+            ) {
+              ForEach(TrackListDensity.allCases) { Text($0.name).tag($0) }
+            }.labelsHidden().frame(width: 220)
           }
           Divider().gridCellUnsizedAxes(.horizontal)
           row("关于") {

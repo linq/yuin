@@ -8,6 +8,7 @@ struct TrackTableAppearance: NSViewRepresentable {
   // Reapply decoration after SwiftUI rebuilds the selected row's hosted cells.
   var selection: Set<String> = []
   var scope: NativeScrollScope? = nil
+  var density: TrackListDensity = .standard
   private static let columnNames: [MusicLocalizedText] = ["歌曲", "艺人", "专辑", "时长"]
   static let selectionColor = NSColor(srgbRed: 0.98, green: 0.14, blue: 0.23, alpha: 1)
 
@@ -19,36 +20,45 @@ struct TrackTableAppearance: NSViewRepresentable {
 
   static func updateSelection(in table: NSTableView) {
     if table.selectionHighlightStyle != .none { table.selectionHighlightStyle = .none }
-    func update(_ row: NSTableRowView, _ index: Int) {
-      let existing = row.subviews.first { $0 is SelectionBackground } as? SelectionBackground
-      guard table.selectedRowIndexes.contains(index) else {
-        existing?.isHidden = true
-        return
-      }
-      let background = existing ?? SelectionBackground(frame: row.bounds)
-      if background.superview == nil {
-        background.autoresizingMask = [.width, .height]
-        row.addSubview(background, positioned: .below, relativeTo: row.subviews.first)
-      }
-      background.frame = row.bounds
-      background.isHidden = false
+    guard let clip = table.enclosingScrollView?.contentView else { return }
+    let existing = clip.subviews.compactMap { $0 as? SelectionBackground }.first {
+      $0.table === table
     }
-    table.enumerateAvailableRowViews { row, index in update(row, index) }
-    // Changing the native highlight style may recreate its visible row views.
-    let visible = table.rows(in: table.visibleRect)
-    if visible.location != NSNotFound {
-      let indexes = IndexSet(integersIn: visible.location..<NSMaxRange(visible))
-      for index in table.selectedRowIndexes.intersection(indexes) {
-        if let row = table.rowView(atRow: index, makeIfNecessary: true) { update(row, index) }
-      }
+    let background = existing ?? SelectionBackground(frame: clip.bounds)
+    background.table = table
+    if background.superview == nil {
+      clip.addSubview(background, positioned: .below, relativeTo: table)
+    }
+    background.frame = clip.bounds
+    background.needsDisplay = true
+    decorateRows(in: table)
+  }
+  private static func decorateRows(in table: NSTableView) {
+    table.enumerateAvailableRowViews { row, index in
+      let color: NSColor = table.selectedRowIndexes.contains(index) ? selectionColor : .clear
+      if row.backgroundColor != color { row.backgroundColor = color }
     }
   }
+  /// A clip-view sibling survives SwiftUI's reconstruction of selected row views.
+  /// Drawing only the viewport avoids a tall backing surface for large playlists.
   private final class SelectionBackground: NSView {
+    weak var table: NSTableView?
     override var allowsVibrancy: Bool { false }
+    override var isFlipped: Bool { true }
+    override func viewWillDraw() {
+      if let table { TrackTableAppearance.decorateRows(in: table) }
+      super.viewWillDraw()
+    }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func draw(_ dirtyRect: NSRect) {
+      guard let table else { return }
       TrackTableAppearance.selectionColor.setFill()
-      NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 0), xRadius: 5, yRadius: 5).fill()
+      for index in table.selectedRowIndexes where index < table.numberOfRows {
+        let rect = convert(table.rect(ofRow: index), from: table).insetBy(dx: 1, dy: 0)
+        if rect.intersects(dirtyRect) {
+          NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
+        }
+      }
     }
   }
 
@@ -72,10 +82,12 @@ struct TrackTableAppearance: NSViewRepresentable {
   func makeNSView(context: Context) -> Anchor { Anchor() }
   func updateNSView(_ view: Anchor, context: Context) {
     view.scope = scope
+    view.density = density
     view.needsLayout = true
   }
   final class Anchor: NSView {
     var scope: NativeScrollScope?
+    var density = TrackListDensity.standard
     private weak var table: NSTableView?
     private var scheduled = false
     private var lastWidth: CGFloat = 0
@@ -138,6 +150,8 @@ struct TrackTableAppearance: NSViewRepresentable {
           if let table { TrackTableAppearance.updateSelection(in: table) }
         }
       }
+      if table.usesAutomaticRowHeights { table.usesAutomaticRowHeights = false }
+      if abs(table.rowHeight - density.rowHeight) > 0.5 { table.rowHeight = density.rowHeight }
       TrackTableAppearance.updateSelection(in: table)
       TrackTableAppearance.localizeColumns(in: table)
       MusicScroller.apply(to: scroll)

@@ -25,6 +25,8 @@ Building requires **Xcode 26 or newer** and its full toolchain. There are no ext
 
 You can also open `Package.swift` in Xcode. Before using `swift run MyMusic` directly, run `swift build` so the `MusicSourceHost` executable is available too. The deployment target is macOS 14+. Local validation has used macOS 27.0.1 on Apple Silicon, and CI uses macOS 26. Universal builds contain Intel code, but Intel hardware and macOS 14–15 have not been tested at runtime.
 
+Song tables have a toolbar for finding loaded songs, sorting, and selecting Standard or Compact density. Density is shared across song tables, saved between launches, and also available in Settings → General. Online search and finding within the current list are separate controls.
+
 ## Automated builds and releases
 
 - Pushing to `main` or opening a pull request runs tests, builds the Universal app, and packages a DMG, ZIP, and checksums. Download these from the workflow's artifacts.

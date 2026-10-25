@@ -39,8 +39,10 @@ import XCTest
       let table = try XCTUnwrap(find(host))
       func pixel(_ index: Int) throws -> NSColor {
         let row = try XCTUnwrap(table.rowView(atRow: index, makeIfNecessary: true))
-        let bitmap = try XCTUnwrap(row.bitmapImageRepForCachingDisplay(in: row.bounds))
-        row.cacheDisplay(in: row.bounds, to: bitmap)
+        let clip = try XCTUnwrap(table.enclosingScrollView?.contentView)
+        let rect = clip.convert(row.bounds, from: row)
+        let bitmap = try XCTUnwrap(clip.bitmapImageRepForCachingDisplay(in: rect))
+        clip.cacheDisplay(in: rect, to: bitmap)
         return try XCTUnwrap(
           bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)?.usingColorSpace(.sRGB)
         )
@@ -71,6 +73,83 @@ import XCTest
       XCTAssertGreaterThan(moved.redComponent, moved.greenComponent * 2)
       XCTAssertGreaterThan(moved.redComponent, moved.blueComponent * 2)
     }
+  }
+  func testSelectingPlaylistRowsNeverRetilesTheScrollViewport() async throws {
+    _ = NSApplication.shared
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = AppModel(
+      store: LibraryStore(url: directory.appendingPathComponent("library.json")),
+      startServices: false)
+    let tracks = (0..<100).map {
+      Track(platform: .wy, songID: "\($0)", title: "Song \($0)", artist: "Artist", album: "Album")
+    }
+    let host = NSHostingView(
+      rootView: TracksView(
+        tracks: tracks,
+        scrollHeader: AnyView(
+          HStack {
+            Color.blue.frame(width: 180, height: 180)
+            VStack {
+              Text("Playlist").font(.title)
+              Button("Play") {}
+            }
+          }.padding(.vertical, 24))
+      ).environmentObject(model))
+    let window = NSWindow(
+      contentRect: NSRect(x: -5000, y: -5000, width: 850, height: 450), styleMask: [.borderless],
+      backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = host
+    defer { window.close() }
+    func settle() async throws {
+      for _ in 0..<16 {
+        host.layoutSubtreeIfNeeded()
+        try await Task.sleep(for: .milliseconds(10))
+      }
+    }
+    func find(_ view: NSView) -> NSTableView? {
+      if let table = view as? NSTableView { return table }
+      return view.subviews.lazy.compactMap(find).first
+    }
+    try await settle()
+    let table = try XCTUnwrap(find(host))
+    let clip = try XCTUnwrap(table.enclosingScrollView?.contentView)
+    clip.postsFrameChangedNotifications = true
+    var frames = [clip.frame]
+    let observer = NotificationCenter.default.addObserver(
+      forName: NSView.frameDidChangeNotification, object: clip, queue: .main
+    ) { _ in frames.append(clip.frame) }
+    defer { NotificationCenter.default.removeObserver(observer) }
+    for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+      window.appearance = NSAppearance(named: appearance)
+      try await settle()
+      for index in [1, 2, 0, 3] {
+        table.selectRowIndexes([index], byExtendingSelection: false)
+        for frame in 0..<12 {
+          host.layoutSubtreeIfNeeded()
+          let row = try XCTUnwrap(table.rowView(atRow: index, makeIfNecessary: true))
+          let clip = try XCTUnwrap(table.enclosingScrollView?.contentView)
+          let rect = clip.convert(row.bounds, from: row)
+          let bitmap = try XCTUnwrap(clip.bitmapImageRepForCachingDisplay(in: rect))
+          clip.cacheDisplay(in: rect, to: bitmap)
+          let color = try XCTUnwrap(
+            bitmap.colorAt(x: bitmap.pixelsWide - 40, y: bitmap.pixelsHigh / 2)?.usingColorSpace(
+              .sRGB))
+          XCTAssertGreaterThan(
+            color.redComponent, color.greenComponent * 2,
+            "The selected row must stay red through frame \(frame), rather than flash while SwiftUI recreates it"
+          )
+          try await Task.sleep(for: .milliseconds(2))
+        }
+        try await settle()
+      }
+    }
+    let heights = frames.map(\.height)
+    XCTAssertLessThanOrEqual(
+      (heights.max() ?? 0) - (heights.min() ?? 0), 1,
+      "Selection must not briefly insert a native column header and re-tile the entire playlist: \(frames)"
+    )
   }
   private final class Rows: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int { 4 }
@@ -107,8 +186,10 @@ import XCTest
       func pixel(_ index: Int) throws -> NSColor {
         let row = try XCTUnwrap(table.rowView(atRow: index, makeIfNecessary: true))
         row.layoutSubtreeIfNeeded()
-        let bitmap = try XCTUnwrap(row.bitmapImageRepForCachingDisplay(in: row.bounds))
-        row.cacheDisplay(in: row.bounds, to: bitmap)
+        let clip = try XCTUnwrap(table.enclosingScrollView?.contentView)
+        let rect = clip.convert(row.bounds, from: row)
+        let bitmap = try XCTUnwrap(clip.bitmapImageRepForCachingDisplay(in: rect))
+        clip.cacheDisplay(in: rect, to: bitmap)
         return try XCTUnwrap(
           bitmap.colorAt(x: bitmap.pixelsWide - 30, y: bitmap.pixelsHigh / 2)?.usingColorSpace(
             .sRGB))

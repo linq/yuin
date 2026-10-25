@@ -116,7 +116,7 @@ import XCTest
     let scroll = try XCTUnwrap(table.enclosingScrollView)
     XCTAssertFalse(table.usesAlternatingRowBackgroundColors)
     XCTAssertNil(table.headerView)
-    XCTAssertGreaterThan(try XCTUnwrap(scroll.contentView as? MusicTableClipView).headerHeight, 220)
+    XCTAssertGreaterThan(try XCTUnwrap(scroll.contentView as? MusicTableClipView).headerHeight, 200)
     scroll.contentView.scroll(
       to: NSPoint(x: 0, y: table.bounds.height - scroll.contentView.bounds.height))
     scroll.reflectScrolledClipView(scroll.contentView)
@@ -162,8 +162,8 @@ import XCTest
     }
     let table = try XCTUnwrap(find(root))
     let scroll = try XCTUnwrap(table.enclosingScrollView)
-    XCTAssertGreaterThan(try XCTUnwrap(scroll.contentView as? MusicTableClipView).headerHeight, 220)
-    XCTAssertLessThan(scroll.contentView.bounds.minY, -220)
+    XCTAssertGreaterThan(try XCTUnwrap(scroll.contentView as? MusicTableClipView).headerHeight, 200)
+    XCTAssertLessThan(scroll.contentView.bounds.minY, -200)
     XCTAssertFalse(collapsed)
     XCTAssertNil(table.headerView)
     let scroller = try XCTUnwrap(scroll.verticalScroller)

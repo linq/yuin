@@ -7,6 +7,8 @@ struct TracksView: View {
   @EnvironmentObject var model: AppModel
   let tracks: [Track]
   var ranked = false
+  var searchContext: TrackSearchContext = .list
+  @AppStorage(TrackListDensity.preferenceKey) private var density: TrackListDensity = .standard
   var loadMore: (() -> Void)? = nil
   var remove: (([Track]) -> Void)? = nil
   var scrollHeader: AnyView? = nil
@@ -17,6 +19,8 @@ struct TracksView: View {
   @State private var showDownload = false
   @State private var filter = ""
   @State private var order = TrackDisplayOrder.original
+  @State private var filterPopover = false
+  @State private var availableWidth: CGFloat = 768
   private var visibleTracks: [Track] {
     TrackPresentation.tracks(tracks, matching: filter, order: order)
   }
@@ -30,8 +34,7 @@ struct TracksView: View {
     let displayedTracks = visibleTracks
     let rankByID = ranked ? ranks : [:]
     let currentID = model.current?.id
-    return VStack(spacing: 6) {
-      if scrollHeader == nil { filterControls }
+    return VStack(spacing: 0) {
       Table(displayedTracks, selection: $selection) {
         TableColumn(L10n.text("歌曲")) { track in
           HStack(spacing: 8) {
@@ -40,12 +43,12 @@ struct TracksView: View {
                 .foregroundStyle(.secondary).frame(width: 24, alignment: .trailing)
             }
             ZStack {
-              Artwork(url: track.artwork, size: 26, radius: 4)
+              Artwork(url: track.artwork, size: density.artworkSize, radius: 3)
               if currentID == track.id {
                 RoundedRectangle(cornerRadius: 4).fill(.black.opacity(0.65))
                 PlaybackStateIcon(isLoading: model.isLoadingAudio, isPlaying: model.isPlaying)
               }
-            }.frame(width: 26, height: 26)
+            }.frame(width: density.artworkSize, height: density.artworkSize)
             Text(track.title).fontWeight(currentID == track.id ? .semibold : .regular)
               .foregroundStyle(
                 selection.contains(track.id)
@@ -56,7 +59,7 @@ struct TracksView: View {
               Image(systemName: "arrow.down.circle.fill").font(.system(size: 10)).foregroundStyle(
                 .secondary)
             }
-          }.frame(height: 28)
+          }.frame(height: density.contentHeight)
         }.width(min: 120, ideal: 320)
         TableColumn(L10n.text("艺人")) {
           Text($0.artist).lineLimit(1).foregroundStyle(
@@ -92,21 +95,19 @@ struct TracksView: View {
       }
       .background(NativeScrollBoundary(scope: scrollScope, isStart: true))
       .overlay(NativeScrollBoundary(scope: scrollScope, isStart: false).allowsHitTesting(false))
-      .background(TrackTableAppearance(selection: selection, scope: scrollScope))
+      .background(TrackTableAppearance(selection: selection, scope: scrollScope, density: density))
       .background {
         if let scrollHeader {
           CollectionScrollHeader(
             content: AnyView(
-              VStack(spacing: 12) {
-                scrollHeader
-                filterControls
-              }.padding(.bottom, 8).environment(\.locale, locale).environmentObject(model)
+              scrollHeader.padding(.bottom, 8).environment(\.locale, locale).environmentObject(
+                model)
             ), active: isActive, scope: scrollScope, collapsed: headerCollapsed)
         }
       }
       .background(
         ScrollPositionMemory(
-          active: isActive, table: true, scope: scrollScope,
+          active: isActive, table: true, scope: scrollScope, layoutKey: density.rawValue,
           rowIDs: displayedTracks.map(\.id), contentCount: tracks.count,
           loadMore: filter.isEmpty ? loadMore : nil)
       )
@@ -140,37 +141,78 @@ struct TracksView: View {
         if let track = selected(ids).first { model.play(track, in: displayedTracks) }
       }
     }
+    .background {
+      GeometryReader { geometry in
+        Color.clear.onChange(of: geometry.size.width, initial: true) { _, width in
+          if abs(availableWidth - width) > 1 { availableWidth = width }
+        }
+      }
+    }
+    .toolbar {
+      if isActive {
+        ToolbarItem(id: "song-table-options", placement: .primaryAction) { optionsMenu }
+        ToolbarItem(id: "song-table-find", placement: .primaryAction) {
+          if searchContext == .results || availableWidth < 500 {
+            Button {
+              filterPopover.toggle()
+            } label: {
+              MusicToolbarLabel(
+                symbol: filter.isEmpty
+                  ? "magnifyingglass" : "line.3.horizontal.decrease.circle.fill")
+            }
+            .buttonStyle(.plain).help(searchContext.placeholder)
+            .accessibilityLabel(searchContext.placeholder)
+            .popover(isPresented: $filterPopover) {
+              VStack(alignment: .leading, spacing: 10) {
+                Text(searchContext.placeholder).font(.headline)
+                localSearch(focus: true).frame(width: 280, height: 38)
+                Text(L10n.text("\(visibleTracks.count) / \(tracks.count) 首歌曲"))
+                  .font(.caption).foregroundStyle(.secondary)
+              }.padding(16)
+            }
+          } else {
+            localSearch(focus: false).frame(
+              width: min(280, max(180, availableWidth - 480)), height: 38)
+          }
+        }
+      }
+    }
     .onChange(of: filter) { _, _ in selection.formIntersection(Set(displayedTracks.map(\.id))) }
     .onChange(of: tracks.map(\.id)) { _, ids in selection.formIntersection(Set(ids)) }
     .sheet(isPresented: $showDownload) { DownloadSheet(tracks: downloadTracks) }
   }
-  private var filterControls: some View {
-    let displayedTracks = visibleTracks
-    return HStack(spacing: 8) {
-      Image(systemName: "line.3.horizontal.decrease").foregroundStyle(.secondary)
-      TextField(L10n.text("筛选已载入的歌曲"), text: $filter).textFieldStyle(.plain)
-        .font(.system(size: 12)).frame(maxWidth: 210).accessibilityLabel(L10n.text("筛选已载入的歌曲"))
-      if !filter.isEmpty {
-        Button {
-          filter = ""
-        } label: {
-          Image(systemName: "xmark.circle.fill")
-        }
-        .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel(L10n.text("清除歌曲筛选"))
-        Text(L10n.text("\(displayedTracks.count) 首")).font(.caption).foregroundStyle(.secondary)
+  private func localSearch(focus: Bool) -> some View {
+    CatalogSearchField(
+      text: $filter, focusRequest: 0, placeholder: searchContext.placeholder,
+      accessibilityName: searchContext.placeholder, focusesOnAppear: focus, submit: {}
+    )
+    .help(L10n.text("仅查找已载入的歌曲"))
+  }
+  private var optionsMenu: some View {
+    Menu {
+      Text(L10n.text("\(visibleTracks.count) / \(tracks.count) 首歌曲"))
+      Picker(L10n.text("排序"), selection: $order) {
+        ForEach(TrackDisplayOrder.allCases, id: \.self) { Text($0.name).tag($0) }
       }
-      Spacer(minLength: 8)
-      Menu {
-        Picker(L10n.text("排序"), selection: $order) {
-          ForEach(TrackDisplayOrder.allCases, id: \.self) { Text($0.name).tag($0) }
-        }
-      } label: {
-        Label(order.name, systemImage: "arrow.up.arrow.down")
+      Divider()
+      Picker(
+        L10n.text("歌曲列表密度"),
+        selection: Binding(
+          get: { density },
+          set: {
+            guard density != $0 else { return }
+            TrackListDensity.prepareForChange()
+            density = $0
+          })
+      ) {
+        ForEach(TrackListDensity.allCases) { Text($0.name).tag($0) }
       }
-      .menuStyle(.borderlessButton).fixedSize().font(.system(size: 11))
-      .foregroundStyle(.secondary).tint(.secondary).help(
-        ranked ? L10n.text("调整显示顺序，保留原始榜单名次") : L10n.text("调整显示顺序"))
-    }.padding(.horizontal, 8).frame(height: 26)
+    } label: {
+      MusicToolbarLabel(symbol: "line.3.horizontal.decrease")
+    }
+    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+    .help(ranked ? L10n.text("调整显示顺序，保留原始榜单名次") : L10n.text("调整显示顺序"))
+    .accessibilityLabel(L10n.text("排序与显示选项"))
   }
 
 }
@@ -199,11 +241,7 @@ struct TrackLibraryView: View {
   @EnvironmentObject var model: AppModel
   @State private var download = false
   var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text(L10n.text("最近聆听的 \(tracks.count) 首歌曲")).font(.system(size: 12)).foregroundStyle(
-        .secondary
-      )
-      .padding(.horizontal, 32).padding(.top, 24)
+    VStack(alignment: .leading, spacing: 0) {
       if tracks.isEmpty {
         ContentUnavailableView(
           L10n.text("还没有歌曲"), systemImage: "music.note",
@@ -211,16 +249,28 @@ struct TrackLibraryView: View {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
-        TracksView(tracks: tracks).padding(.horizontal, 24)
+        TracksView(tracks: tracks, searchContext: .history).padding(.horizontal, 24)
       }
     }.toolbar {
       if isActive {
+        ToolbarItem(placement: .principal) {
+          Text(L10n.text("\(tracks.count) 首歌曲")).font(.system(size: 12)).foregroundStyle(.secondary)
+        }
         ToolbarItemGroup(placement: .primaryAction) {
-          Button(L10n.text("全部播放")) {
+          Button {
             if let first = tracks.first { model.play(first, in: tracks) }
+          } label: {
+            MusicToolbarLabel(symbol: "play.fill")
           }
+          .buttonStyle(.plain).help(L10n.text("全部播放")).accessibilityLabel(L10n.text("全部播放"))
           .disabled(tracks.isEmpty)
-          Button(L10n.text("全部下载…")) { download = true }.disabled(tracks.isEmpty)
+          Menu {
+            Button(L10n.text("全部下载…")) { download = true }
+          } label: {
+            MusicToolbarLabel(symbol: "ellipsis")
+          }
+          .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+          .accessibilityLabel(L10n.text("更多操作")).disabled(tracks.isEmpty)
         }
       }
     }.sheet(isPresented: $download) { DownloadSheet(tracks: tracks) }

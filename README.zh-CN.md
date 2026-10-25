@@ -23,6 +23,8 @@ open dist/Yuin.app
 
 也可在 Xcode 打开 `Package.swift` 编辑，构建需要 Xcode 26 或更新版本。单独 `swift run MyMusic` 前应先执行 `swift build`，确保 `MusicSourceHost` 同时构建。部署目标 macOS 14+，本机验证环境为 macOS 27.0.1 / Apple Silicon，CI 使用 macOS 26；Universal 包含 Intel 架构，但尚未在 Intel 真机或 macOS 14–15 上运行验收。
 
+歌曲列表顶部提供已载入歌曲查找、排序及“标准／紧凑”密度选择。密度在各歌曲列表间共用，重启后保留，也可在“设置 → 通用”中调整。在线搜索与当前列表内查找使用不同提示。
+
 ## 自动构建与发布
 
 - 推送 `main` 或创建 Pull Request：运行测试，编译 Universal 应用，生成 DMG、ZIP 和校验文件，可在 Actions 的 Artifacts 下载。

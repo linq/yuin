@@ -75,7 +75,7 @@ struct CatalogView: View {
             if let error, tracks.isEmpty { errorView(error) }
             trackResults(artworkSize: min(180, max(120, geometry.size.height * 0.38)))
           }
-          .padding(.top, collection == nil ? 20 : tracks.isEmpty ? 24 : 0)
+          .padding(.top, collection != nil && tracks.isEmpty ? 24 : 0)
         }
       }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: geometry.size.width, initial: true) { _, width in
@@ -127,15 +127,16 @@ struct CatalogView: View {
               Button {
                 fullCollection(collection, action: .play)
               } label: {
-                Image(systemName: "play.fill").frame(width: 28, height: 28)
+                MusicToolbarLabel(symbol: "play.fill")
               }.buttonStyle(.plain).disabled(actionBusy || tracks.isEmpty)
                 .accessibilityLabel(L10n.text("播放"))
-            }.frame(maxWidth: max(100, min(360, availableWidth - 320)))
+            }.frame(maxWidth: max(80, min(260, availableWidth - 600)))
           }
         }
         ToolbarItem(id: "catalog-platform-" + kind.rawValue, placement: .primaryAction) {
           if let collection {
-            Text(collection.platform.name).font(.system(size: 12)).foregroundStyle(.secondary)
+            MusicToolbarLabel(symbol: "music.note", title: collection.platform.name)
+              .foregroundStyle(.secondary)
           } else {
             platformPicker
           }
@@ -187,8 +188,9 @@ struct CatalogView: View {
         ForEach(MusicPlatform.allCases) { Text($0.name).tag($0) }
       }
     } label: {
-      Text(platform.name).font(.system(size: 12, weight: .medium))
-    }.help(L10n.text("切换音乐平台")).accessibilityLabel(L10n.text("音乐平台：\(platform.name)"))
+      MusicToolbarLabel(symbol: "music.note", title: platform.name, disclosure: true)
+    }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+      .help(L10n.text("切换音乐平台")).accessibilityLabel(L10n.text("音乐平台：\(platform.name)"))
   }
 
   private var collectionGrid: some View {
@@ -340,6 +342,8 @@ struct CatalogView: View {
     } else {
       TracksView(
         tracks: tracks, ranked: collection?.isChart == true,
+        searchContext: collection == nil
+          ? .results : collection?.isChart == true ? .chart : .playlist,
         loadMore: tracks.count < total && !busy && trackError == nil
           ? { load(reset: false) } : nil,
         scrollHeader: collection.map {
