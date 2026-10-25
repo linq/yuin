@@ -68,7 +68,10 @@ struct TracksView: View {
               }
             }.frame(width: 26, height: 26)
             Text(track.title).fontWeight(currentID == track.id ? .semibold : .regular)
-              .foregroundStyle(currentID == track.id ? Color.pink : Color.primary)
+              .foregroundStyle(
+                selection.contains(track.id)
+                  ? Color.white : currentID == track.id ? Color.pink : Color.primary
+              )
               .lineLimit(1).help(track.title)
             if model.offlineURL(track) != nil {
               Image(systemName: "arrow.down.circle.fill").font(.system(size: 10)).foregroundStyle(
@@ -77,15 +80,20 @@ struct TracksView: View {
           }.frame(height: 28)
         }.width(min: 120, ideal: 320)
         TableColumn(L10n.text("艺人")) {
-          Text($0.artist).lineLimit(1).foregroundStyle(.secondary).help($0.artist)
+          Text($0.artist).lineLimit(1).foregroundStyle(
+            selection.contains($0.id) ? Color.white.opacity(0.9) : Color.secondary
+          ).help($0.artist)
         }
         .width(min: 70, ideal: 150)
         TableColumn(L10n.text("专辑")) {
-          Text($0.album).lineLimit(1).foregroundStyle(.secondary).help($0.album)
+          Text($0.album).lineLimit(1).foregroundStyle(
+            selection.contains($0.id) ? Color.white.opacity(0.9) : Color.secondary
+          ).help($0.album)
         }
         .width(min: 90, ideal: 180)
         TableColumn(L10n.text("时长")) {
-          Text(Track.time($0.duration)).monospacedDigit().foregroundStyle(.secondary)
+          Text(Track.time($0.duration)).monospacedDigit().foregroundStyle(
+            selection.contains($0.id) ? Color.white.opacity(0.9) : Color.secondary)
         }.width(45)
         TableColumn("") { track in
           Menu {
@@ -96,7 +104,8 @@ struct TracksView: View {
                 showDownload = true
               })
           } label: {
-            Image(systemName: "ellipsis").foregroundStyle(.secondary)
+            Image(systemName: "ellipsis").foregroundStyle(
+              selection.contains(track.id) ? Color.white : Color.secondary)
           }
           .menuStyle(.borderlessButton).menuIndicator(.hidden).tint(.secondary).frame(width: 20)
           .accessibilityLabel(L10n.text("\(track.title)的操作"))

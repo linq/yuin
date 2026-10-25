@@ -52,7 +52,9 @@ See the [release guide](docs/RELEASING.md) for details. Supporting project docum
 
 The floating player provides playback controls, shuffle and repeat-one modes, seeking, song actions, queue access, and volume. Click its artwork or song title to expand Now Playing. Narrow windows hide some controls, while playback modes remain available in the song menu.
 
-Track changes fade out the previous song while the new song starts at normal volume, without fading in. In Settings → Playback & Downloads → Fade Out Previous Song, choose 0–12 seconds (5 seconds by default; 0 turns the fade off). Sequential playback prepares the next track and starts the transition before the current song ends. Network buffering or the remaining audio may shorten the fade. Artwork and song information transition smoothly, keeping the previous artwork visible until its replacement has loaded.
+Track changes fade out the previous song while the new song starts at normal volume, without fading in. In Settings → Playback → Fade Out, choose 0–12 seconds (5 seconds by default; 0 turns the fade off). Sequential playback prepares the next track and starts the transition before the current song ends. Network buffering or the remaining audio may shorten the fade. Artwork and song information transition smoothly, keeping the previous artwork visible until its replacement has loaded.
+
+The app opens to Playlists. Settings uses General, Playback, Files, and Advanced tabs; changes take effect immediately. Download quality and the download folder are under Files.
 
 Switching away from Search and back within the same window preserves draft keywords, submitted results, loaded pages, selection, and scroll position. Changing platforms elsewhere causes Search to refresh for the new platform when you return. Search sessions are not restored across app restarts.
 

@@ -5,12 +5,12 @@ struct ContentView: View {
   @Environment(\.locale) private var locale
   @EnvironmentObject var model: AppModel
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var section: String? = "search"
+  @State private var section: String? = "playlists"
   @State private var columnVisibility: NavigationSplitViewVisibility = .all
   @State private var showNewList = false
   @State private var listName = ""
   @State private var visitedPages = Set<String>()
-  @State private var visitedCatalogs: Set<CatalogView.Kind> = [.search]
+  @State private var visitedCatalogs: Set<CatalogView.Kind> = [.playlists]
   @State private var searchFocusRequest = 0
   @State private var openCatalogDetails: Set<CatalogView.Kind> = []
   @State private var backdrop = SidebarBackdropState()

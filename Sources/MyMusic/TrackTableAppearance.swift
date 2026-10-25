@@ -6,6 +6,42 @@ import SwiftUI
 struct TrackTableAppearance: NSViewRepresentable {
   @Environment(\.locale) private var locale
   private static let columnNames: [MusicLocalizedText] = ["歌曲", "艺人", "专辑", "时长"]
+  static let selectionColor = NSColor(srgbRed: 0.98, green: 0.14, blue: 0.23, alpha: 1)
+
+  static func updateSelection(in table: NSTableView) {
+    if table.selectionHighlightStyle != .none { table.selectionHighlightStyle = .none }
+    func update(_ row: NSTableRowView, _ index: Int) {
+      let existing = row.subviews.first { $0 is SelectionBackground } as? SelectionBackground
+      guard table.selectedRowIndexes.contains(index) else {
+        existing?.isHidden = true
+        return
+      }
+      let background = existing ?? SelectionBackground(frame: row.bounds)
+      if background.superview == nil {
+        background.autoresizingMask = [.width, .height]
+        row.addSubview(background, positioned: .below, relativeTo: row.subviews.first)
+      }
+      background.frame = row.bounds
+      background.isHidden = false
+    }
+    table.enumerateAvailableRowViews { row, index in update(row, index) }
+    // Changing the native highlight style may recreate its visible row views.
+    let visible = table.rows(in: table.visibleRect)
+    if visible.location != NSNotFound {
+      let indexes = IndexSet(integersIn: visible.location..<NSMaxRange(visible))
+      for index in table.selectedRowIndexes.intersection(indexes) {
+        if let row = table.rowView(atRow: index, makeIfNecessary: true) { update(row, index) }
+      }
+    }
+  }
+  private final class SelectionBackground: NSView {
+    override var allowsVibrancy: Bool { false }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func draw(_ dirtyRect: NSRect) {
+      TrackTableAppearance.selectionColor.setFill()
+      NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 0), xRadius: 5, yRadius: 5).fill()
+    }
+  }
 
   // SwiftUI retains native columns along with scroll position, but does not always
   // update their titles after a locale change. Update the existing columns in place.
@@ -30,6 +66,8 @@ struct TrackTableAppearance: NSViewRepresentable {
     private weak var table: NSTableView?
     private var scheduled = false
     private var lastWidth: CGFloat = 0
+    private var selectionObserver: NSObjectProtocol?
+    private var scrollObserver: NSObjectProtocol?
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
       DispatchQueue.main.async { [weak self] in self?.configure() }
@@ -70,6 +108,20 @@ struct TrackTableAppearance: NSViewRepresentable {
         }
       }
       guard let table, let scroll = table.enclosingScrollView else { return }
+      if selectionObserver == nil {
+        selectionObserver = NotificationCenter.default.addObserver(
+          forName: NSTableView.selectionDidChangeNotification, object: table, queue: .main
+        ) { [weak table] _ in
+          if let table { TrackTableAppearance.updateSelection(in: table) }
+        }
+        scroll.contentView.postsBoundsChangedNotifications = true
+        scrollObserver = NotificationCenter.default.addObserver(
+          forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main
+        ) { [weak table] _ in
+          if let table { TrackTableAppearance.updateSelection(in: table) }
+        }
+      }
+      TrackTableAppearance.updateSelection(in: table)
       TrackTableAppearance.localizeColumns(in: table)
       MusicScroller.apply(to: scroll)
       if table.usesAlternatingRowBackgroundColors {
@@ -108,6 +160,10 @@ struct TrackTableAppearance: NSViewRepresentable {
         }
       }
       table.sizeToFit()
+    }
+    deinit {
+      if let selectionObserver { NotificationCenter.default.removeObserver(selectionObserver) }
+      if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver) }
     }
   }
   private final class QuietHeaderView: NSTableHeaderView {

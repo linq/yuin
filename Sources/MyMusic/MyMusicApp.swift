@@ -86,8 +86,7 @@ import SwiftUI
       }
     }
     Settings {
-      SettingsView().environment(\.locale, language.locale).environmentObject(model).tint(.pink)
-        .background(WindowChrome())
+      SettingsView().environment(\.locale, language.locale).environmentObject(model)
         .onChange(of: appearance) { _, mode in mode.apply() }
     }
   }

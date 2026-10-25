@@ -295,8 +295,16 @@
 "余音" = "Yuin";
 "关于余音" = "About Yuin";
 "%@ · 开发版" = "%@ · Development";
-"切歌淡出" = "Fade Out Previous Song";
+"切歌淡出" = "Fade Out";
 "切歌淡出时长" = "Fade-Out Duration";
 "关闭" = "Off";
 "%@ 秒" = "%@ s";
 "新歌曲直接播放，原歌曲按设定时长淡出。0 秒关闭。" = "New songs start at normal volume while the previous song fades out. Set to 0 to turn off.";
+"通用" = "General";
+"文件" = "Files";
+"高级" = "Advanced";
+"完成" = "Done";
+"同时下载两首。" = "Download up to two songs at a time.";
+"重启后恢复待播队列，但不会自动播放。" = "The queue is restored after relaunch without starting playback.";
+"播放设置" = "Playback";
+"音质" = "Quality";
