@@ -158,7 +158,7 @@ struct CollectionGrid<Content: View>: View {
   @ViewBuilder let content: () -> Content
   var body: some View {
     LazyVGrid(
-      columns: [GridItem(.adaptive(minimum: 155, maximum: 220), spacing: 20)],
+      columns: [GridItem(.adaptive(minimum: 155, maximum: 220), spacing: 20, alignment: .top)],
       alignment: .leading, spacing: 26, content: content
     ).padding(.horizontal, 32)
   }

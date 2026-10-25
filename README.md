@@ -60,7 +60,9 @@ The app opens to Playlists. Settings uses General, Playback, Files, and Advanced
 
 Switching away from Search and back within the same window preserves draft keywords, submitted results, loaded pages, selection, and scroll position. Changing platforms elsewhere causes Search to refresh for the new platform when you return. Search sessions are not restored across app restarts.
 
-Keyboard shortcuts: `⌘N` creates a playlist, `⇧⌘I` imports a source, `Space` toggles playback, `⌘←` / `⌘→` skips tracks, and `⌘U` toggles the queue. Space continues to work normally when typing in search or other text fields. System media controls are supported.
+Back and Forward navigate across sidebar pages and playlist/chart details within the same window, preserving each page's results, selection, and scroll position. In cover grids, use arrow keys to move focus and Return to open the focused collection. The queue keeps the visible song in place when playback advances; use Back to Up Next to return to the start. Its default width is 260 pt, and a resized width is remembered.
+
+Keyboard shortcuts: `⌘[` / `⌘]` goes back / forward, `⌘F` opens music search, `⌘N` creates a playlist, `⇧⌘I` imports a source, `Space` toggles playback, `⌘←` / `⌘→` skips tracks, and `⌘U` toggles the queue. Space continues to work normally when typing in search or other text fields. System media controls are supported.
 
 ## Data and backups
 

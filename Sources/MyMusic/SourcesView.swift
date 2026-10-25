@@ -59,7 +59,7 @@ struct SourcesView: View {
     return VStack(alignment: .leading, spacing: 8) {
       HStack(alignment: .top) {
         Image(systemName: "waveform.path").font(.title3)
-          .foregroundStyle(active ? Color.pink : Color.secondary)
+          .foregroundStyle(active ? MusicAccent.color : Color.secondary)
           .frame(width: 32, height: 32).background(
             .quaternary, in: RoundedRectangle(cornerRadius: 10))
         VStack(alignment: .leading, spacing: 5) {
@@ -99,7 +99,7 @@ struct SourcesView: View {
               capability.actions.contains("musicUrl")
             {
               Text("\(platform.name) · \(capability.qualitys.joined(separator: " / "))")
-                .font(.caption).foregroundStyle(.pink)
+                .font(.caption).foregroundStyle(MusicAccent.color)
             }
           }
         }
@@ -117,6 +117,6 @@ struct SourcesView: View {
       .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
       .overlay(
         RoundedRectangle(cornerRadius: 12).strokeBorder(
-          active ? Color.pink.opacity(0.4) : Color.secondary.opacity(0.12)))
+          active ? MusicAccent.color.opacity(0.4) : Color.secondary.opacity(0.12)))
   }
 }

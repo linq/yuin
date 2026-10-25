@@ -22,6 +22,8 @@ struct CatalogView: View {
   let kind: Kind
   var isActive = true
   var searchFocusRequest = 0
+  var initialCollection: MusicCollection? = nil
+  var navigateCollection: ((MusicCollection) -> Void)? = nil
   @EnvironmentObject var model: AppModel
   private var platform: MusicPlatform { model.state.selectedPlatform ?? .kw }
   @State private var query = ""
@@ -51,6 +53,21 @@ struct CatalogView: View {
   @State private var availableWidth: CGFloat = 1000
   @State private var gridScrollScope = NativeScrollScope()
   @State private var detailHeaderCollapsed = false
+  @State private var gridWidth: CGFloat = 0
+  @State private var selectedCollectionID: String?
+  @FocusState private var gridFocused: Bool
+  init(
+    kind: Kind, isActive: Bool = true, searchFocusRequest: Int = 0,
+    initialCollection: MusicCollection? = nil,
+    navigateCollection: ((MusicCollection) -> Void)? = nil
+  ) {
+    self.kind = kind
+    self.isActive = isActive
+    self.searchFocusRequest = searchFocusRequest
+    self.initialCollection = initialCollection
+    self.navigateCollection = navigateCollection
+    _collection = State(initialValue: initialCollection)
+  }
   private var showingTracks: Bool { kind == .search || collection != nil }
   private var page: Int { showingTracks ? trackPage : browsePage }
   private var error: String? { showingTracks ? trackError : browseError }
@@ -58,7 +75,7 @@ struct CatalogView: View {
   var body: some View {
     GeometryReader { geometry in
       ZStack(alignment: .topLeading) {
-        if kind != .search {
+        if kind != .search && initialCollection == nil {
           // Keep the grid mounted under the detail so Back restores the exact scroll offset.
           collectionGrid
             .opacity(collection == nil ? 1 : 0)
@@ -93,15 +110,6 @@ struct CatalogView: View {
                 frame: CGRect(x: 0, y: 24, width: 180, height: min(250, geometry.size.height)))
             ])
         }
-      }
-    }
-    .preference(
-      key: CatalogDetailPreference.self,
-      value: isActive && collection != nil ? [kind] : []
-    )
-    .onReceive(NotificationCenter.default.publisher(for: .backInMusicCatalog)) { notification in
-      if isActive && collection != nil && notification.object as? String == kind.rawValue {
-        goBack()
       }
     }
     .toolbar {
@@ -146,7 +154,11 @@ struct CatalogView: View {
     .task {
       guard displayedPlatform == nil else { return }
       displayedPlatform = platform
-      if kind != .search { load(reset: true) }
+      if let initialCollection {
+        open(initialCollection)
+      } else if kind != .search {
+        load(reset: true)
+      }
     }
     .onChange(of: platform) { _, _ in
       if isActive && collection == nil { updatePlatform() }
@@ -194,73 +206,114 @@ struct CatalogView: View {
   }
 
   private var collectionGrid: some View {
-    ScrollView {
-      VStack(spacing: 20) {
-        if !submitted.isEmpty {
-          HStack {
-            Text(L10n.text("“\(submitted)”的歌单 · \(collections.count) / \(collectionTotal)"))
-              .font(.system(size: 12)).foregroundStyle(.secondary)
-            Spacer()
-            Button(L10n.text("返回推荐歌单")) {
-              query = ""
-              search()
-            }.buttonStyle(.plain)
-          }.padding(.horizontal, 32)
-        }
-        if let browseError { errorView(browseError) }
-        CollectionGrid {
-          ForEach(collections) { item in
-            CollectionCard(
-              collection: item, saved: isSaved(item), lists: model.state.playlists,
-              busy: actionBusy && actionCollectionKey == collectionKey(item),
-              actionsDisabled: actionBusy, open: { open(item) },
-              perform: { fullCollection(item, action: $0) }, cancel: cancelAction
-            )
-            .background {
-              GeometryReader { geometry in
-                let frame = geometry.frame(in: .named("musicDetail"))
-                Color.clear.preference(
-                  key: SidebarArtworkPreference.self,
-                  value: isActive && collection == nil && frame.minX < 40
-                    && frame.maxY > 0
-                    ? [
-                      SidebarArtworkSample(
-                        id: item.id, url: item.artwork,
-                        frame: CGRect(
-                          x: frame.minX, y: (frame.minY / 24).rounded() * 24,
-                          width: frame.width, height: frame.height))
-                    ] : [])
+    ScrollViewReader { gridProxy in
+      ScrollView {
+        VStack(spacing: 20) {
+          if !submitted.isEmpty {
+            HStack {
+              Text(L10n.text("“\(submitted)”的歌单 · \(collections.count) / \(collectionTotal)"))
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+              Spacer()
+              Button(L10n.text("返回推荐歌单")) {
+                query = ""
+                search()
+              }.buttonStyle(.plain)
+            }.padding(.horizontal, 32)
+          }
+          if let browseError { errorView(browseError) }
+          CollectionGrid {
+            ForEach(collections) { item in
+              CollectionCard(
+                collection: item, saved: isSaved(item), lists: model.state.playlists,
+                busy: actionBusy && actionCollectionKey == collectionKey(item),
+                actionsDisabled: actionBusy,
+                keyboardSelected: gridFocused && selectedCollectionID == item.id,
+                open: {
+                  selectedCollectionID = item.id
+                  if let navigateCollection { navigateCollection(item) } else { open(item) }
+                },
+                perform: { fullCollection(item, action: $0) }, cancel: cancelAction
+              ).id(item.id)
+                .background {
+                  GeometryReader { geometry in
+                    let frame = geometry.frame(in: .named("musicDetail"))
+                    Color.clear.preference(
+                      key: SidebarArtworkPreference.self,
+                      value: isActive && collection == nil && frame.minX < 40
+                        && frame.maxY > 0
+                        ? [
+                          SidebarArtworkSample(
+                            id: item.id, url: item.artwork,
+                            frame: CGRect(
+                              x: frame.minX, y: (frame.minY / 24).rounded() * 24,
+                              width: frame.width, height: frame.height))
+                        ] : [])
+                  }
+                }
+            }
+          }.background {
+            GeometryReader { geometry in
+              Color.clear.onChange(of: geometry.size.width, initial: true) { _, width in
+                if abs(gridWidth - width) > 1 { gridWidth = width }
               }
             }
           }
+          if busy && collection == nil { ProgressView().padding() }
+          if kind == .playlists && !collections.isEmpty && hasMoreCollections {
+            Text(busy ? L10n.text("正在载入…") : L10n.text("滚动到底部自动载入更多歌单"))
+              .font(.caption).foregroundStyle(.secondary).padding(.bottom, 12)
+          }
+          if !busy && collections.isEmpty && browseError == nil {
+            ContentUnavailableView(
+              submitted.isEmpty ? L10n.text("没有可显示的内容") : L10n.text("没有找到相关歌单"),
+              systemImage: "square.grid.2x2",
+              description: Text(
+                submitted.isEmpty ? L10n.text("此平台可能暂未提供可用的公开数据。") : L10n.text("试试其他关键词或音乐平台。")))
+          }
+        }.padding(.top, 28).padding(.bottom, 24)
+          .accessibilityHidden(!isActive || collection != nil)
+      }.scrollContentBackground(.hidden)
+        .background(NativeScrollBoundary(scope: gridScrollScope, isStart: true))
+        .overlay(
+          NativeScrollBoundary(scope: gridScrollScope, isStart: false).allowsHitTesting(false)
+        )
+        .modifier(CatalogScrollEdge())
+        .background(
+          ScrollPositionMemory(
+            active: isActive && collection == nil, scope: gridScrollScope,
+            rowIDs: collections.map(\.id), contentCount: collections.count,
+            loadMore: kind == .playlists && collection == nil && hasMoreCollections
+              && !busy && browseError == nil && !collections.isEmpty
+              ? { load(reset: false) } : nil)
+        )
+        .id("\(displayedPlatform?.rawValue ?? ""):\(submitted)")
+        .focusable().focusEffectDisabled().focused($gridFocused)
+        .onMoveCommand { direction in
+          guard isActive, collection == nil, !collections.isEmpty else { return }
+          let current = collections.firstIndex { $0.id == selectedCollectionID }
+          let index = CollectionKeyboardNavigation.destination(
+            current: current, count: collections.count,
+            width: gridWidth > 0 ? gridWidth : availableWidth, direction: direction)
+          selectedCollectionID = collections[index].id
+          gridFocused = true
+          gridProxy.scrollTo(collections[index].id)
         }
-        if busy && collection == nil { ProgressView().padding() }
-        if kind == .playlists && !collections.isEmpty && hasMoreCollections {
-          Text(busy ? L10n.text("正在载入…") : L10n.text("滚动到底部自动载入更多歌单"))
-            .font(.caption).foregroundStyle(.secondary).padding(.bottom, 12)
+        .onKeyPress(.return) {
+          guard gridFocused, let item = collections.first(where: { $0.id == selectedCollectionID })
+          else { return .ignored }
+          if let navigateCollection { navigateCollection(item) } else { open(item) }
+          return .handled
         }
-        if !busy && collections.isEmpty && browseError == nil {
-          ContentUnavailableView(
-            submitted.isEmpty ? L10n.text("没有可显示的内容") : L10n.text("没有找到相关歌单"),
-            systemImage: "square.grid.2x2",
-            description: Text(
-              submitted.isEmpty ? L10n.text("此平台可能暂未提供可用的公开数据。") : L10n.text("试试其他关键词或音乐平台。")))
+        .onChange(of: gridFocused) { _, focused in
+          if focused && selectedCollectionID == nil { selectedCollectionID = collections.first?.id }
         }
-      }.padding(.top, 28).padding(.bottom, 24)
-        .accessibilityHidden(!isActive || collection != nil)
-    }.scrollContentBackground(.hidden)
-      .background(NativeScrollBoundary(scope: gridScrollScope, isStart: true))
-      .overlay(NativeScrollBoundary(scope: gridScrollScope, isStart: false).allowsHitTesting(false))
-      .modifier(CatalogScrollEdge())
-      .background(
-        ScrollPositionMemory(
-          active: isActive && collection == nil, scope: gridScrollScope,
-          rowIDs: collections.map(\.id), contentCount: collections.count,
-          loadMore: kind == .playlists && collection == nil && hasMoreCollections
-            && !busy && browseError == nil && !collections.isEmpty
-            ? { load(reset: false) } : nil)
-      )
-      .id("\(displayedPlatform?.rawValue ?? ""):\(submitted)")
+        .onChange(of: isActive) { _, active in
+          if active, selectedCollectionID != nil, collection == nil {
+            DispatchQueue.main.async { gridFocused = true }
+          }
+        }
+    }
+
   }
 
   private func collectionHeader(_ item: MusicCollection, artworkSize: CGFloat, inset: CGFloat = 32)
@@ -277,20 +330,20 @@ struct CatalogView: View {
       VStack(alignment: .leading, spacing: 10) {
         Text(item.title).font(.system(size: 23, weight: .bold)).lineLimit(2).help(item.title)
         Text(item.subtitle.isEmpty ? item.platform.name : item.subtitle)
-          .font(.system(size: 14)).foregroundStyle(.pink).lineLimit(1)
+          .font(.system(size: 14)).foregroundStyle(MusicAccent.color).lineLimit(1)
         Text(total > 0 ? L10n.text("\(total) 首歌曲 · \(item.platform.name)") : item.platform.name)
           .font(.system(size: 12)).foregroundStyle(.secondary)
         HStack(spacing: 10) {
           Button {
             fullCollection(item, action: .play)
           } label: {
-            Label(L10n.text("播放"), systemImage: "play.fill").padding(.horizontal, 10)
-          }.buttonStyle(.borderedProminent)
+            Label(L10n.text("播放"), systemImage: "play.fill")
+          }.buttonStyle(MusicCollectionActionStyle(prominent: true))
           Button {
             fullCollection(item, action: .shuffle)
           } label: {
             Label(L10n.text("随机播放"), systemImage: "shuffle")
-          }.buttonStyle(.bordered)
+          }.buttonStyle(MusicCollectionActionStyle())
           Menu {
             Button(L10n.text("下一首播放")) { fullCollection(item, action: .playNext) }
             Button(L10n.text("添加到队尾")) { fullCollection(item, action: .enqueue) }
@@ -305,9 +358,10 @@ struct CatalogView: View {
             }.disabled(model.state.playlists.isEmpty)
             Button(L10n.text("下载整张列表…")) { fullCollection(item, action: .download) }
           } label: {
-            Image(systemName: saved ? "checkmark.circle" : "ellipsis")
+            MusicToolbarLabel(symbol: saved ? "checkmark.circle" : "ellipsis")
           }
-          .menuIndicator(.hidden).fixedSize().help(
+          .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().tint(MusicAccent.color)
+          .help(
             saved ? L10n.text("已添加 · 更多操作") : L10n.text("歌单操作")
           )
           .accessibilityLabel(saved ? L10n.text("已添加 · 歌单操作") : L10n.text("歌单操作"))
@@ -386,19 +440,6 @@ struct CatalogView: View {
     collection = item
     total = 0
     load(reset: true)
-  }
-
-  private func goBack() {
-    task?.cancel()
-    generation = UUID()
-    cancelAction()
-    busy = false
-    detailHeaderCollapsed = false
-    collection = nil
-    tracks = []
-    trackError = nil
-    total = 0
-    if displayedPlatform != platform { updatePlatform() }
   }
 
   private func updatePlatform() {
@@ -606,6 +647,7 @@ struct CollectionCard: View {
   let lists: [LocalPlaylist]
   let busy: Bool
   let actionsDisabled: Bool
+  var keyboardSelected = false
   let open: () -> Void
   let perform: (CollectionAction) -> Void
   let cancel: () -> Void
@@ -623,7 +665,7 @@ struct CollectionCard: View {
               Artwork(url: collection.artwork, size: geometry.size.width, radius: 8)
               if collection.isChart && (collection.artwork ?? "").isEmpty {
                 Text(collection.title).font(.system(size: 22, weight: .semibold))
-                  .foregroundStyle(.pink).padding(14)
+                  .foregroundStyle(MusicAccent.color).padding(14)
               }
             }
           }.aspectRatio(1, contentMode: .fit)
@@ -668,6 +710,12 @@ struct CollectionCard: View {
             .accessibilityLabel(L10n.text("\(collection.title)的操作")).help(L10n.text("歌单操作"))
         }.padding(12).opacity(revealsControls ? 1 : 0).allowsHitTesting(revealsControls)
       }.aspectRatio(1, contentMode: .fit)
+        .overlay {
+          RoundedRectangle(cornerRadius: 8).strokeBorder(
+            MusicAccent.color.opacity(keyboardSelected || focus != nil ? 1 : 0), lineWidth: 3
+          )
+          .allowsHitTesting(false)
+        }
       Button(action: open) {
         VStack(alignment: .leading, spacing: 3) {
           HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -707,9 +755,20 @@ struct CollectionCard: View {
   }
 }
 
-struct CatalogDetailPreference: PreferenceKey {
-  static var defaultValue: Set<CatalogView.Kind> = []
-  static func reduce(value: inout Set<CatalogView.Kind>, nextValue: () -> Set<CatalogView.Kind>) {
-    value.formUnion(nextValue())
+enum CollectionKeyboardNavigation {
+  static func destination(
+    current: Int?, count: Int, width: CGFloat, direction: MoveCommandDirection
+  ) -> Int {
+    guard count > 0, let current else { return 0 }
+    let columns = max(1, Int((max(0, width - 64) + 20) / 175))
+    let delta: Int
+    switch direction {
+    case .left: delta = -1
+    case .right: delta = 1
+    case .up: delta = -columns
+    case .down: delta = columns
+    @unknown default: delta = 0
+    }
+    return min(count - 1, max(0, current + delta))
   }
 }

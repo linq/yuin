@@ -15,9 +15,15 @@ extension EnvironmentValues {
 struct RetainedPage: ViewModifier {
   let active: Bool
   var covered = false
+  @State private var focusScope = PageFocusScope()
   func body(content: Content) -> some View {
     let interactive = active && !covered
     content
+      .background(PageFocusMemory(scope: focusScope, active: interactive, start: true))
+      .overlay(
+        PageFocusMemory(scope: focusScope, active: interactive, start: false).allowsHitTesting(
+          false)
+      )
       .environment(\.musicPageIsActive, interactive)
       // A fading player reveals the selected page underneath. Coverage changes
       // interaction, never the page's pixels or identity.

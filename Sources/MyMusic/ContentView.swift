@@ -5,14 +5,15 @@ struct ContentView: View {
   @Environment(\.locale) private var locale
   @EnvironmentObject var model: AppModel
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var section: String? = "playlists"
+  @State private var navigation = BrowserNavigationHistory()
+  private var section: String? {
+    get { navigation.current.section }
+    nonmutating set { if let newValue { navigation.visit(MusicLocation(section: newValue)) } }
+  }
   @State private var columnVisibility: NavigationSplitViewVisibility = .all
   @State private var showNewList = false
   @State private var listName = ""
-  @State private var visitedPages = Set<String>()
-  @State private var visitedCatalogs: Set<CatalogView.Kind> = [.playlists]
   @State private var searchFocusRequest = 0
-  @State private var openCatalogDetails: Set<CatalogView.Kind> = []
   @State private var backdrop = SidebarBackdropState()
   var body: some View {
     browser
@@ -147,20 +148,25 @@ struct ContentView: View {
       VStack(spacing: 0) {
         ZStack {
           // Retain each visited catalog and its native scroll views across sidebar navigation.
-          ForEach(CatalogView.Kind.allCases, id: \.self) { kind in
-            if visitedCatalogs.contains(kind) {
+          ForEach(navigation.visited.filter { $0.catalog != nil }) { location in
+            if let kind = location.catalog {
               CatalogView(
-                kind: kind, isActive: activeCatalog == kind && !model.showNowPlaying,
-                searchFocusRequest: searchFocusRequest
+                kind: kind, isActive: navigation.current == location && !model.showNowPlaying,
+                searchFocusRequest: searchFocusRequest, initialCollection: location.collection,
+                navigateCollection: { item in
+                  navigation.visit(MusicLocation(section: kind.rawValue, collection: item))
+                }
               )
-              .modifier(RetainedPage(active: activeCatalog == kind, covered: model.showNowPlaying))
+              .modifier(
+                RetainedPage(active: navigation.current == location, covered: model.showNowPlaying))
             }
           }
-          ForEach(libraryPages, id: \.self) { page in
-            if visitedPages.contains(page) {
-              libraryPage(page)
-                .modifier(RetainedPage(active: section == page, covered: model.showNowPlaying))
-            }
+          ForEach(
+            navigation.visited.filter { $0.catalog == nil && libraryPages.contains($0.section) }
+          ) { location in
+            libraryPage(location.section)
+              .modifier(
+                RetainedPage(active: navigation.current == location, covered: model.showNowPlaying))
           }
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
       }
@@ -181,23 +187,15 @@ struct ContentView: View {
     }
     .background(WindowChrome())
     .modifier(HideWindowToolbarTitle())
-    .onChange(of: section) { _, _ in
-      model.showNowPlaying = false
-      if let activeCatalog { visitedCatalogs.insert(activeCatalog) }
-      if let section, libraryPages.contains(section) { visitedPages.insert(section) }
-    }
+    .onChange(of: navigation.current) { _, _ in model.showNowPlaying = false }
     .onChange(of: model.state.playlists.map(\.id)) { _, _ in
-      visitedPages.formIntersection(Set(libraryPages))
-      if let section, section.hasPrefix("list:"), !libraryPages.contains(section) {
-        self.section = "history"
-      }
+      navigation.removeMissingLists(valid: Set(libraryPages))
     }
     .onReceive(NotificationCenter.default.publisher(for: .focusMusicSearch)) { _ in
       model.showNowPlaying = false
       section = "search"
       searchFocusRequest += 1
     }
-    .onPreferenceChange(CatalogDetailPreference.self) { openCatalogDetails = $0 }
     .onPreferenceChange(SidebarArtworkPreference.self) {
       if !model.showNowPlaying { backdrop.submit($0) }
     }
@@ -215,25 +213,25 @@ struct ContentView: View {
       if !model.showNowPlaying {
         ToolbarItem(placement: .navigation) {
           HStack(spacing: 12) {
-            if let activeCatalog, openCatalogDetails.contains(activeCatalog) {
-              Button {
-                NotificationCenter.default.post(
-                  name: .backInMusicCatalog, object: activeCatalog.rawValue)
-              } label: {
-                Image(systemName: "chevron.left")
-              }
-              .help(L10n.text("返回\(activeCatalog.title)")).accessibilityLabel(
-                L10n.text("返回\(activeCatalog.title)")
-              )
+            Button {
+              navigation.back()
+            } label: {
+              Image(systemName: "chevron.left").frame(width: 20, height: 28)
+            }.disabled(!navigation.canGoBack)
+              .help(L10n.text("后退")).accessibilityLabel(L10n.text("后退"))
               .keyboardShortcut("[", modifiers: .command)
-            }
+            Button {
+              navigation.forward()
+            } label: {
+              Image(systemName: "chevron.right").frame(width: 20, height: 28)
+            }.disabled(!navigation.canGoForward)
+              .help(L10n.text("前进")).accessibilityLabel(L10n.text("前进"))
+              .keyboardShortcut("]", modifiers: .command)
             Text(pageTitle).lineLimit(1).truncationMode(.tail).frame(
               maxWidth: 240, alignment: .leading
             ).font(.system(size: 13, weight: .semibold))
               .foregroundStyle(.secondary)
-          }.fixedSize().id(
-            "\(section ?? "search")-\(activeCatalog.map { openCatalogDetails.contains($0) } ?? false)"
-          )
+          }.fixedSize()
         }
       }
       if #available(macOS 26, *) {
@@ -250,7 +248,8 @@ struct ContentView: View {
       QueueView(inPlayer: false)
         .allowsHitTesting(!model.showNowPlaying)
         .accessibilityHidden(model.showNowPlaying)
-        .inspectorColumnWidth(min: 260, ideal: 270, max: 280)
+        .inspectorColumnWidth(min: 240, ideal: QueueWidthPreference.width(), max: 360)
+        .background(QueueWidthMemory(active: model.showQueue && !model.showNowPlaying))
     }
 
     .alert(

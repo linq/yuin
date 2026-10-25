@@ -52,7 +52,7 @@ struct TracksView: View {
             Text(track.title).fontWeight(currentID == track.id ? .semibold : .regular)
               .foregroundStyle(
                 selection.contains(track.id)
-                  ? Color.white : currentID == track.id ? Color.pink : Color.primary
+                  ? Color.white : currentID == track.id ? MusicAccent.color : Color.primary
               )
               .lineLimit(1).help(track.title)
             if model.offlineURL(track) != nil {
@@ -89,7 +89,8 @@ struct TracksView: View {
             Image(systemName: "ellipsis").foregroundStyle(
               selection.contains(track.id) ? Color.white : Color.secondary)
           }
-          .menuStyle(.borderlessButton).menuIndicator(.hidden).tint(.secondary).frame(width: 20)
+          .menuStyle(.borderlessButton).menuIndicator(.hidden)
+          .tint(selection.contains(track.id) ? .white : .secondary).frame(width: 20)
           .accessibilityLabel(L10n.text("\(track.title)的操作"))
         }.width(24)
       }
@@ -312,7 +313,8 @@ struct PlaylistView: View {
                   }
                 } label: {
                   Label(L10n.text("播放"), systemImage: "play.fill")
-                }.buttonStyle(.borderedProminent).disabled(list.tracks.isEmpty)
+                }.buttonStyle(MusicCollectionActionStyle(prominent: true)).disabled(
+                  list.tracks.isEmpty)
                 Button {
                   if let first = list.tracks.randomElement() {
                     model.state.queue.mode = .shuffle
@@ -321,7 +323,7 @@ struct PlaylistView: View {
                 } label: {
                   Label(L10n.text("随机播放"), systemImage: "shuffle")
                 }
-                .buttonStyle(.bordered).disabled(list.tracks.isEmpty)
+                .buttonStyle(MusicCollectionActionStyle()).disabled(list.tracks.isEmpty)
                 Menu {
                   Button(L10n.text("下一首播放")) { model.enqueue(list.tracks, next: true) }.disabled(
                     list.tracks.isEmpty)
@@ -335,9 +337,10 @@ struct PlaylistView: View {
                   }
                   Button(L10n.text("删除列表…"), role: .destructive) { delete = true }
                 } label: {
-                  Image(systemName: "ellipsis")
-                }.menuIndicator(.hidden).fixedSize().help(L10n.text("列表操作")).accessibilityLabel(
-                  L10n.text("列表操作"))
+                  MusicToolbarLabel(symbol: "ellipsis")
+                }.menuStyle(.borderlessButton).menuIndicator(.hidden).tint(MusicAccent.color)
+                  .fixedSize().help(L10n.text("列表操作")).accessibilityLabel(
+                    L10n.text("列表操作"))
               }.controlSize(.regular)
             }.frame(maxWidth: .infinity, alignment: .leading)
           }.padding(.horizontal, 32).padding(.top, 24).padding(.bottom, 8)

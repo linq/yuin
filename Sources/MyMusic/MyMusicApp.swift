@@ -28,15 +28,17 @@ import SwiftUI
   @AppStorage("appearanceMode") private var appearance: MusicAppearance = .system
   var body: some Scene {
     WindowGroup(L10n.text("余音")) {
-      ContentView().environment(\.locale, language.locale).environmentObject(model).tint(.pink)
-        .controlSize(.small).frame(
-          minWidth: 760, minHeight: 460
-        )
-        .onAppear {
-          delegate.model = model
-          appearance.apply()
-        }
-        .onChange(of: appearance) { _, mode in mode.apply() }
+      ContentView().environment(\.locale, language.locale).environmentObject(model).tint(
+        MusicAccent.color
+      )
+      .controlSize(.small).frame(
+        minWidth: 760, minHeight: 460
+      )
+      .onAppear {
+        delegate.model = model
+        appearance.apply()
+      }
+      .onChange(of: appearance) { _, mode in mode.apply() }
     }
     .defaultSize(width: 1220, height: 800)
     .windowToolbarStyle(.unified)
@@ -93,6 +95,5 @@ import SwiftUI
 }
 
 extension Notification.Name {
-  static let backInMusicCatalog = Notification.Name("MyMusic.backInCatalog")
   static let focusMusicSearch = Notification.Name("MyMusic.focusSearch")
 }

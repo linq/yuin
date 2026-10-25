@@ -320,3 +320,7 @@
 "更多操作" = "More Actions";
 "%@ / %@ 首歌曲" = "%@ / %@ songs";
 "仅查找已载入的歌曲" = "Find within loaded songs";
+
+"回到接下来播放" = "Back to Up Next";
+"后退" = "Back";
+"前进" = "Forward";

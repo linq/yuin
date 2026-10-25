@@ -10,7 +10,7 @@ struct TrackTableAppearance: NSViewRepresentable {
   var scope: NativeScrollScope? = nil
   var density: TrackListDensity = .standard
   private static let columnNames: [MusicLocalizedText] = ["歌曲", "艺人", "专辑", "时长"]
-  static let selectionColor = NSColor(srgbRed: 0.98, green: 0.14, blue: 0.23, alpha: 1)
+  static let selectionColor = MusicAccent.native
 
   static func supplementaryHeader(for table: NSTableView) -> NSTableHeaderView {
     let header = QuietHeaderView(frame: NSRect(x: 0, y: 0, width: table.bounds.width, height: 24))

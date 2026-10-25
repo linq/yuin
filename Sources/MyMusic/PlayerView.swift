@@ -40,14 +40,15 @@ struct PlayerBar: View {
             model.showNowPlaying = true
           } label: {
             Image(systemName: "quote.bubble")
-              .foregroundStyle(model.showNowPlaying && model.showLyrics ? Color.pink : .primary)
+              .foregroundStyle(
+                model.showNowPlaying && model.showLyrics ? MusicAccent.color : .primary)
           }.accessibilityLabel(L10n.text("歌词")).help(L10n.text("歌词"))
           Button {
             if model.showNowPlaying { model.showLyrics = false }
             model.showQueue.toggle()
           } label: {
             Image(systemName: "list.bullet")
-              .foregroundStyle(model.showQueue ? Color.pink : .primary)
+              .foregroundStyle(model.showQueue ? MusicAccent.color : .primary)
               .frame(width: 27, height: 27)
               .background(
                 model.showQueue ? Color.primary.opacity(0.12) : .clear,
@@ -136,7 +137,7 @@ private struct PlaybackControls: View {
       model.prepareUpcomingPlayback()
     } label: {
       Image(systemName: symbol).font(.system(size: large ? 15 : 11, weight: .semibold))
-        .foregroundStyle(model.state.queue.mode == mode ? Color.pink : Color.secondary)
+        .foregroundStyle(model.state.queue.mode == mode ? MusicAccent.color : Color.secondary)
         .frame(width: 20, height: 24)
     }.accessibilityLabel(label).accessibilityValue(
       model.state.queue.mode == mode ? L10n.text("已开启") : L10n.text("已关闭")
@@ -238,6 +239,9 @@ struct QueueView: View {
   @Environment(\.locale) private var locale
   @EnvironmentObject var model: AppModel
   @State private var showHistory = false
+  @State private var browsing = false
+  @State private var jumpRequest = 0
+  @State private var scrollScope = NativeScrollScope()
   var inPlayer: Bool? = nil
   private var player: Bool { inPlayer ?? model.showNowPlaying }
   private var upcoming: [QueueEntry] { model.state.queue.upcoming }
@@ -251,7 +255,7 @@ struct QueueView: View {
         header.padding(.horizontal, 16).padding(.bottom, 10)
         Divider()
       }
-      ScrollViewReader { proxy in
+      ZStack(alignment: .bottomTrailing) {
         List {
           if player {
             header.padding(.vertical, 8)
@@ -300,9 +304,26 @@ struct QueueView: View {
         .listStyle(.plain).font(.system(size: player ? 14 : 12))
         .contentMargins(.horizontal, 0, for: .scrollContent)
         .scrollContentBackground(.hidden)
-        .background(QueueListAppearance(player: player))
-        .onAppear { scrollToStart(proxy) }
-        .onChange(of: model.state.queue.currentID) { _, _ in scrollToStart(proxy) }
+        .alternatingRowBackgrounds(.disabled)
+        .background(NativeScrollBoundary(scope: scrollScope, isStart: true))
+        .overlay(NativeScrollBoundary(scope: scrollScope, isStart: false).allowsHitTesting(false))
+        .background(
+          QueueListAppearance(
+            player: player, scope: scrollScope, entryIDs: upcoming.map(\.id),
+            active: player
+              ? model.showNowPlaying && model.showQueue : !model.showNowPlaying && model.showQueue,
+            jumpRequest: jumpRequest, browsingChanged: { browsing = $0 }))
+        if browsing {
+          Button {
+            jumpRequest += 1
+          } label: {
+            Label(L10n.text("回到接下来播放"), systemImage: "arrow.up.to.line")
+              .font(.system(size: 11, weight: .medium)).padding(.horizontal, 12).padding(
+                .vertical, 8
+              )
+              .background(.regularMaterial, in: Capsule())
+          }.buttonStyle(.plain).padding(10)
+        }
       }
       if model.state.queue.mode == .shuffle {
         Text(L10n.text("随机模式会从队列中随机选择歌曲"))
@@ -345,13 +366,7 @@ struct QueueView: View {
     }.buttonStyle(.plain).help(label).accessibilityLabel(label)
       .accessibilityValue(selected ? L10n.text("已开启") : L10n.text("已关闭"))
   }
-  private func scrollToStart(_ proxy: ScrollViewProxy) {
-    if player {
-      proxy.scrollTo("queue-start", anchor: .top)
-    } else if let id = upcoming.first?.id {
-      proxy.scrollTo(id, anchor: .top)
-    }
-  }
+
 }
 
 private struct QueueTrackRow: View {
@@ -369,7 +384,7 @@ private struct QueueTrackRow: View {
             Color.primary.opacity(0.12), lineWidth: 0.5))
       VStack(alignment: .leading, spacing: 3) {
         Text(entry.track.title).font(.system(size: 14)).lineLimit(1)
-          .foregroundStyle(current ? Color.pink : .primary)
+          .foregroundStyle(current ? MusicAccent.color : .primary)
         Text(
           [entry.track.artist, entry.track.album].filter { !$0.isEmpty }.joined(separator: " — ")
         )
@@ -410,7 +425,7 @@ struct PlaybackStateIcon: View {
       } else {
         Image(systemName: isPlaying ? "waveform" : "pause.fill").font(.system(size: 11))
       }
-    }.foregroundStyle(.pink)
+    }.foregroundStyle(MusicAccent.color)
       .accessibilityLabel(
         isLoading ? L10n.text("载入中") : isPlaying ? L10n.text("正在播放") : L10n.text("已暂停"))
   }

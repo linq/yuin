@@ -5,13 +5,123 @@ import SwiftUI
 /// must blend into the album backdrop when embedded in the full-window player.
 struct QueueListAppearance: NSViewRepresentable {
   let player: Bool
+  var scope: NativeScrollScope? = nil
+  var entryIDs: [UUID] = []
+  var active = true
+  var jumpRequest = 0
+  var browsingChanged: (Bool) -> Void = { _ in }
   func makeNSView(context: Context) -> Anchor { Anchor() }
   func updateNSView(_ view: Anchor, context: Context) {
     view.player = player
+    view.scope = scope
+    view.active = active
+    view.browsingChanged = browsingChanged
+    view.update(entries: entryIDs, jumpRequest: jumpRequest)
     view.needsLayout = true
   }
+  static func dismantleNSView(_ view: Anchor, coordinator: ()) { view.detach() }
   final class Anchor: NSView {
     var player = false
+    var scope: NativeScrollScope?
+    var active = true
+    var browsingChanged: (Bool) -> Void = { _ in }
+    private weak var scroll: NSScrollView?
+    private weak var table: NSTableView?
+    private var observer: NSObjectProtocol?
+    private var ids: [String] = []
+    private var anchorID: String?
+    private var rowInset: CGFloat = 0
+    private var origin = NSPoint.zero
+    private var browsing = false
+    private var restoring = false
+    private var jumpRequest = 0
+    private var revision = 0
+
+    func update(entries: [UUID], jumpRequest: Int) {
+      let next = (player ? ["queue-start"] : []) + entries.map(\.uuidString)
+      let changed = next != ids
+      ids = next
+      if self.jumpRequest != jumpRequest {
+        self.jumpRequest = jumpRequest
+        origin = .zero
+        anchorID = nil
+        restoreAfterLayout()
+      } else if changed, scroll != nil {
+        restoreAfterLayout()
+      }
+    }
+    private func capture() {
+      guard active, !restoring, let scroll else { return }
+      origin = scroll.contentView.bounds.origin
+      if let table {
+        let row = table.row(at: NSPoint(x: 1, y: origin.y))
+        if ids.indices.contains(row) {
+          anchorID = ids[row]
+          rowInset = origin.y - table.rect(ofRow: row).minY
+        } else {
+          anchorID = nil
+        }
+      }
+      let next = origin.y > 60
+      if browsing != next {
+        browsing = next
+        DispatchQueue.main.async { [weak self] in self?.browsingChanged(next) }
+      }
+    }
+    private func restoreAfterLayout() {
+      revision += 1
+      let token = revision
+      restoring = true
+      func restore() {
+        guard let scroll else { return }
+        scroll.layoutSubtreeIfNeeded()
+        var point = origin
+        if browsing, let anchorID, let index = ids.firstIndex(of: anchorID), let table,
+          index < table.numberOfRows
+        {
+          point.y = table.rect(ofRow: index).minY + rowInset
+        }
+        scroll.contentView.scroll(to: point)
+        scroll.reflectScrolledClipView(scroll.contentView)
+      }
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.revision == token else { return }
+        restore()
+        DispatchQueue.main.async { [weak self] in
+          guard let self, self.revision == token else { return }
+          restore()
+          self.restoring = false
+          self.capture()
+        }
+      }
+    }
+    private func attach(_ scroll: NSScrollView) {
+      guard self.scroll !== scroll else { return }
+      detach()
+      self.scroll = scroll
+      func findTable(_ node: NSView) -> NSTableView? {
+        if let table = node as? NSTableView { return table }
+        return node.subviews.lazy.compactMap(findTable).first
+      }
+      table = scroll.documentView.flatMap(findTable)
+      // Let AppKit show a real insertion gap while retaining native List reordering.
+      table?.draggingDestinationFeedbackStyle = .gap
+      scroll.contentView.postsBoundsChangedNotifications = true
+      observer = NotificationCenter.default.addObserver(
+        forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main
+      ) { [weak self] _ in self?.capture() }
+      capture()
+    }
+    func detach() {
+      if let observer { NotificationCenter.default.removeObserver(observer) }
+      observer = nil
+      scroll = nil
+      table = nil
+      revision += 1
+      restoring = false
+    }
+    deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+
     private var scheduled = false
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
@@ -37,7 +147,8 @@ struct QueueListAppearance: NSViewRepresentable {
       }
       var parent = superview
       while let node = parent {
-        if let scroll = find(node) {
+        if let scroll = scope?.resolve(table: true) ?? (scope == nil ? find(node) : nil) {
+          attach(scroll)
           scroll.identifier = NSUserInterfaceItemIdentifier(
             player ? "MyMusic.playerQueue" : "MyMusic.sidebarQueue")
           scroll.drawsBackground = false

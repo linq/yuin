@@ -153,8 +153,10 @@ struct SidebarArtworkBackdrop: View {
 struct SidebarLabelStyle: LabelStyle {
   func makeBody(configuration: Configuration) -> some View {
     HStack(spacing: 10) {
-      configuration.icon.foregroundStyle(.pink).font(.system(size: 18, weight: .regular))
-        .frame(width: 20)
+      configuration.icon.foregroundStyle(MusicAccent.color).font(
+        .system(size: 18, weight: .regular)
+      )
+      .frame(width: 20)
       configuration.title
     }.padding(.vertical, 2)
   }
