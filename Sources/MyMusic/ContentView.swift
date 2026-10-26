@@ -15,6 +15,7 @@ struct ContentView: View {
   @State private var listName = ""
   @State private var searchFocusRequest = 0
   @State private var backdrop = SidebarBackdropState()
+  @State private var toolbarSource = NavigationToolbarSource()
   var body: some View {
     browser
       .background(
@@ -175,8 +176,9 @@ struct ContentView: View {
       .overlay(alignment: .top) {
         // Scope toolbar blur to this column; a window-wide material would also
         // paint over the sidebar's continuous background behind the controls.
-        NavigationToolbarBackdrop()
+        NavigationToolbarBackdrop(source: toolbarSource)
       }
+      .environment(\.navigationToolbarSource, toolbarSource)
       .modifier(FloatingPlayerOverlay())
 
     }

@@ -100,6 +100,7 @@ struct TracksView: View {
       .background(NativeScrollBoundary(scope: scrollScope, isStart: true))
       .overlay(NativeScrollBoundary(scope: scrollScope, isStart: false).allowsHitTesting(false))
       .background(TrackTableAppearance(selection: selection, scope: scrollScope, density: density))
+      .background(NavigationToolbarScrollSource(scope: scrollScope, active: isActive, table: true))
       .background {
         if let scrollHeader {
           CollectionScrollHeader(

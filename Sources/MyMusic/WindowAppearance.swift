@@ -68,12 +68,10 @@ struct HideWindowToolbarTitle: ViewModifier {
 
 /// Draw only behind this column's toolbar, without covering adjacent columns.
 struct NavigationToolbarBackdrop: View {
+  let source: NavigationToolbarSource
   var body: some View {
     GeometryReader { geometry in
-      Rectangle().fill(MusicSurface.navigationMaterial)
-        // Equal tint strength keeps both appearances translucent; the light
-        // base stays white without the former near-opaque white overlay.
-        .overlay(Color(nsColor: MusicSurface.content).opacity(0.35))
+      NavigationToolbarSurface(source: source)
         .frame(height: geometry.safeAreaInsets.top)
         .offset(y: -geometry.safeAreaInsets.top)
     }.allowsHitTesting(false).accessibilityHidden(true)

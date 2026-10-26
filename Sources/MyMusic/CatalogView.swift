@@ -280,6 +280,10 @@ struct CatalogView: View {
         )
         .modifier(CatalogScrollEdge())
         .background(
+          NavigationToolbarScrollSource(
+            scope: gridScrollScope, active: isActive && collection == nil)
+        )
+        .background(
           ScrollPositionMemory(
             active: isActive && collection == nil, scope: gridScrollScope,
             rowIDs: collections.map(\.id), contentCount: collections.count,
