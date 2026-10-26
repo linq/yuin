@@ -54,9 +54,53 @@ import XCTest
     let backdropRect = host.convert(backdrop.bounds, from: backdrop)
     XCTAssertLessThanOrEqual(
       backdropRect.minY, 1, "The queue blur must also cover the strip beside the window toolbar")
+    XCTAssertLessThanOrEqual(
+      backdropRect.height, 100,
+      "Queue controls must start near the window top rather than reserve a second toolbar band")
     let table = try XCTUnwrap(find(host, NSTableView.self))
     let first = host.convert(table.rect(ofRow: 0), from: table)
     XCTAssertGreaterThanOrEqual(first.minY, backdropRect.maxY - 1)
+  }
+
+  func testEmptyHeaderPreservesTheUnderlyingQueueSurface() async throws {
+    _ = NSApplication.shared
+    let window = NSWindow(
+      contentRect: NSRect(x: -5000, y: -5000, width: 300, height: 200),
+      styleMask: [.borderless], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+    let root = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 200))
+    window.contentView = root
+    let table = NSTableView(frame: NSRect(x: 0, y: 0, width: 300, height: 500))
+    table.backgroundColor = .clear
+    root.addSubview(table)
+    let backdrop = QueueHeaderBackdrop(frame: NSRect(x: 0, y: 0, width: 300, height: 92))
+    root.addSubview(backdrop)
+    let bodySurface = NSHostingView(rootView: Rectangle().fill(MusicSurface.navigationMaterial))
+    bodySurface.frame = NSRect(x: 0, y: 100, width: 300, height: 92)
+    root.addSubview(bodySurface)
+    for name in [NSAppearance.Name.aqua, .darkAqua] {
+      window.appearance = NSAppearance(named: name)
+      backdrop.update(table: table, rect: NSRect(x: 0, y: -92, width: 300, height: 92))
+      try await Task.sleep(for: .milliseconds(100))
+      func sample(_ view: NSView) throws -> NSColor {
+        view.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: bitmap)
+        return try XCTUnwrap(bitmap.colorAt(x: 20, y: 20)?.usingColorSpace(.sRGB))
+      }
+      let header = try sample(backdrop)
+      let body = try sample(bodySurface)
+      for (actual, expected) in zip(
+        [header.redComponent, header.greenComponent, header.blueComponent, header.alphaComponent],
+        [body.redComponent, body.greenComponent, body.blueComponent, body.alphaComponent])
+      {
+        XCTAssertEqual(
+          actual, expected, accuracy: 0.02,
+          "An empty header must match the queue body's material, without its own white tint in \(name)"
+        )
+      }
+    }
   }
 
   func testHeaderActuallyReceivesTheContentScrollingBehindIt() async throws {

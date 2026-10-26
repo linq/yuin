@@ -247,12 +247,9 @@ struct QueueView: View {
   private var player: Bool { inPlayer ?? model.showNowPlaying }
   private var upcoming: [QueueEntry] { model.state.queue.upcoming }
   var body: some View {
-    GeometryReader { geometry in
-      queueContent(topInset: player ? 0 : geometry.safeAreaInsets.top)
-        .ignoresSafeArea(.container, edges: player ? [] : .top)
-    }
+    queueContent.ignoresSafeArea(.container, edges: player ? [] : .top)
   }
-  private func queueContent(topInset: CGFloat) -> some View {
+  private var queueContent: some View {
     VStack(spacing: 0) {
       ZStack(alignment: .bottomTrailing) {
         List {
@@ -309,7 +306,7 @@ struct QueueView: View {
         .background(
           QueueListAppearance(
             player: player, scope: scrollScope, headerReference: headerReference,
-            headerHeight: QueueHeaderLayout.height + topInset,
+            headerHeight: QueueHeaderLayout.height,
             entryIDs: upcoming.map(\.id),
             active: player
               ? model.showNowPlaying && model.showQueue : !model.showNowPlaying && model.showQueue,
@@ -317,7 +314,7 @@ struct QueueView: View {
         )
         .overlay(alignment: .top) {
           if !player {
-            browserHeader(topInset: topInset).frame(height: QueueHeaderLayout.height + topInset)
+            browserHeader.frame(height: QueueHeaderLayout.height)
           }
         }
         if browsing {
@@ -344,16 +341,15 @@ struct QueueView: View {
     }
     .accessibilityElement(children: .contain).accessibilityLabel(L10n.text("待播队列"))
   }
-  private func browserHeader(topInset: CGFloat) -> some View {
+  private var browserHeader: some View {
     VStack(spacing: 0) {
       HStack(spacing: 8) {
         queueMode(.repeatOne, symbol: "repeat.1", label: L10n.text("单曲循环"))
         queueMode(.shuffle, symbol: "shuffle", label: L10n.text("随机播放"))
-      }.padding(.horizontal, 12).padding(.top, 14).padding(.bottom, 14)
+      }.padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 14)
       header.padding(.horizontal, 16).padding(.bottom, 10)
       Divider()
     }
-    .padding(.top, topInset)
     // The native table adapter supplies the live material underneath these controls.
     // A SwiftUI material here would cover that native backdrop with a second surface.
     .background(QueueHeaderAnchor(reference: headerReference))
