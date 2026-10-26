@@ -68,14 +68,12 @@ struct HideWindowToolbarTitle: ViewModifier {
 
 /// Draw only behind this column's toolbar, without covering adjacent columns.
 struct NavigationToolbarBackdrop: View {
-  @Environment(\.colorScheme) private var colorScheme
   var body: some View {
     GeometryReader { geometry in
       Rectangle().fill(MusicSurface.navigationMaterial)
-        .overlay {
-          // Keep the light toolbar white while gently diffusing passing artwork.
-          if colorScheme == .light { Color.white.opacity(0.94) }
-        }
+        // Equal tint strength keeps both appearances translucent; the light
+        // base stays white without the former near-opaque white overlay.
+        .overlay(Color(nsColor: MusicSurface.content).opacity(0.35))
         .frame(height: geometry.safeAreaInsets.top)
         .offset(y: -geometry.safeAreaInsets.top)
     }.allowsHitTesting(false).accessibilityHidden(true)
